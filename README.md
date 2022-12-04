@@ -1,5 +1,7 @@
 # Platypus
 
+![Logo of Platypus](logo.jpg)
+
 A BI application for comparing and correlating land prices and property prices.
 
 ## What is this application about?
