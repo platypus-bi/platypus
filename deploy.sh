@@ -29,6 +29,19 @@ function license_prompt_mssql {
     fi
 }
 
+function generate_password {
+    if command -v "apg" &>/dev/null; then
+        echo "Using apg to generate the password"
+        PASSWORD="$(apg -a 1 -n 1 -m 20)"
+    else
+        echo "Falling back to /dev/urandom for password generation"
+        PASSWORD="$(cat /dev/urandom | tr -dc \[:graph:\] | head -c 16)"
+    fi
+    echo "Generated the random password $PASSWORD"
+    echo "Please save it for later use"
+}
+
+check_installed "sed"
 check_installed "dirname"
 check_installed "readlink"
 check_installed "docker"
@@ -38,11 +51,21 @@ SCRIPTDIR=$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")
 license_prompt_mssql
 LICENSE_PROMPT=$?
 
-# TODO: Check .env file for configuration (e.g. sa password)
-
 if [ "$LICENSE_PROMPT" -ne 0 ]; then
     exit 1
 fi
+
+# Check env file
+BASEMENT_ENV="$SCRIPTDIR/basement/.env"
+source "$BASEMENT_ENV"
+
+# Check sa password
+if [ -z "$MSSQL_SA_PASSWORD" ];
+    generate_password
+    sed -n -i "s/MSSQL_SA_PASSWORD=/MSSQL_SA_PASSWORD=$PASSWORD/" "$BASEMENT_ENV" 
+fi
+
+# TODO: Check .env file for configuration (e.g. sa password)
 
 docker compose pull --file "$SCRIPTDIR/basement/docker-compose.yml"
 docker compose up -d --file "$SCRIPTDIR/basement/docker-compose.yml"
