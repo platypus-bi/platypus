@@ -35,7 +35,7 @@ function generate_password {
         PASSWORD="$(apg -a 1 -n 1 -m 20)"
     else
         echo "Falling back to /dev/urandom for password generation"
-        PASSWORD="$(cat /dev/urandom | tr -dc \[:graph:\] | head -c 16)"
+        PASSWORD="$(< /dev/urandom tr -dc \[:graph:\] | head -c 16)"
     fi
     echo "Generated the random password $PASSWORD"
     echo "Please save it for later use"
@@ -57,12 +57,13 @@ fi
 
 # Check env file
 BASEMENT_ENV="$SCRIPTDIR/basement/.env"
+# shellcheck source=./basement/.env
 source "$BASEMENT_ENV"
 
 # Check sa password
-if [ -z "$MSSQL_SA_PASSWORD" ];
+if [ -z "$MSSQL_SA_PASSWORD" ]; then
     generate_password
-    sed -n -i "s/MSSQL_SA_PASSWORD=/MSSQL_SA_PASSWORD=$PASSWORD/" "$BASEMENT_ENV" 
+    sed -n -i "s/MSSQL_SA_PASSWORD=/MSSQL_SA_PASSWORD=$PASSWORD/" "$BASEMENT_ENV"
 fi
 
 # TODO: Check .env file for configuration (e.g. sa password)
