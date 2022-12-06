@@ -28,6 +28,7 @@ function license_prompt_mssql {
     echo "Please make sure to read the Microsoft SQL Server End-User License Agreement"
     echo "https://go.microsoft.com/fwlink/?linkid=857698"
     read -p "Do you agree to the license agreement? (y/N)" -n 1 -r
+    echo ""
 
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         return 0
@@ -80,5 +81,5 @@ fi
 
 # TODO: Check .env file for configuration (e.g. sa password)
 
-docker compose pull --file "$SCRIPTDIR/basement/docker-compose.yml"
-docker compose up -d --file "$SCRIPTDIR/basement/docker-compose.yml"
+docker compose --file "$SCRIPTDIR/basement/docker-compose.yml" pull
+docker compose --file "$SCRIPTDIR/basement/docker-compose.yml" up -d
