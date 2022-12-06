@@ -4,6 +4,13 @@ function echo_error {
     echo "$@" >&2 # Write to stderr
 }
 
+function root_check {
+    if [ "$(id -u)" -ne 0 ]; then
+        echo_error "Please run this script as root!"
+        exit 2
+    fi
+}
+
 function check_installed {
     if [ $# -ne 1 ]; then
         echo_error "Pass exactly one executable to check!"
@@ -47,6 +54,8 @@ check_installed "readlink"
 check_installed "docker"
 
 SCRIPTDIR=$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")
+
+root_check
 
 license_prompt_mssql
 LICENSE_PROMPT=$?
