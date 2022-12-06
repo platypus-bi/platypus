@@ -63,7 +63,10 @@ source "$BASEMENT_ENV"
 # Check sa password
 if [ -z "$MSSQL_SA_PASSWORD" ]; then
     generate_password
-    sed -n -i "s/MSSQL_SA_PASSWORD=/MSSQL_SA_PASSWORD=$PASSWORD/" "$BASEMENT_ENV"
+    
+    # Substitute the variable in the .env file, making sure to use # as a
+    # delimiter for sed and escaping it in the password.
+    sed -i -r -n "s#^(MSSQL_SA_PASSWORD=).*#\1\"${PASSWORD//#/\\#}\"#p" "$BASEMENT_ENV"
 fi
 
 # TODO: Check .env file for configuration (e.g. sa password)
