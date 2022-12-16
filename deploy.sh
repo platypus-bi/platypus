@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 function echo_error {
     echo "$@" >&2 # Write to stderr
@@ -45,7 +45,7 @@ function generate_password {
         echo "Falling back to /dev/urandom for password generation"
         PASSWORD="$(< /dev/urandom tr -dc \[:graph:\] | tr -d \" | head -c 16)"
     fi
-    echo "Generated the random password $PASSWORD"
+    echo "Generated the random password \"$PASSWORD\""
     echo "Please save it for later use"
 }
 
@@ -78,8 +78,6 @@ if [ -z "$MSSQL_SA_PASSWORD" ]; then
     # delimiter for sed and escaping it in the password.
     sed -i -r -n "s#^(MSSQL_SA_PASSWORD=).*#\1\"${PASSWORD//#/\\#}\"#p" "$BASEMENT_ENV"
 fi
-
-# TODO: Check .env file for configuration (e.g. sa password)
 
 docker compose --file "$SCRIPTDIR/basement/docker-compose.yml" pull
 docker compose --file "$SCRIPTDIR/basement/docker-compose.yml" up -d
