@@ -56,6 +56,9 @@ check_installed "docker"
 
 SCRIPTDIR=$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")
 
+echo "Welcome to Platypus!"
+echo ""
+
 root_check
 
 license_prompt_mssql
@@ -81,3 +84,5 @@ fi
 
 docker compose --file "$SCRIPTDIR/basement/docker-compose.yml" pull
 docker compose --file "$SCRIPTDIR/basement/docker-compose.yml" up -d
+
+echo "Platypus installed successfully!"
