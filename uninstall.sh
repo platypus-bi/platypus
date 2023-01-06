@@ -29,8 +29,8 @@ function uninstall {
 
     SCRIPTDIR=$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")
 
-    docker compose --file "$SCRIPTDIR/basement/docker-compose.yml" down
-    docker compose --file "$SCRIPTDIR/basement/docker-compose.yml" rm --force --volumes
+    docker compose --file "$SCRIPTDIR/docker-compose.yml" down
+    docker compose --file "$SCRIPTDIR/docker-compose.yml" rm --force --volumes
 
     echo "Platypus successfully stopped and uninstalled."
     echo "There might be unused docker images left. Clean them up manually or run \"docker system prune\"."

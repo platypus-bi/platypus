@@ -69,9 +69,9 @@ if [ "$LICENSE_PROMPT" -ne 0 ]; then
 fi
 
 # Check env file
-BASEMENT_ENV="$SCRIPTDIR/basement/.env"
-# shellcheck source=./basement/.env
-source "$BASEMENT_ENV"
+ENV_FILE="$SCRIPTDIR/.env"
+# shellcheck source=./.env
+source "$ENV_FILE"
 
 # Check sa password
 if [ -z "$MSSQL_SA_PASSWORD" ]; then
@@ -79,10 +79,10 @@ if [ -z "$MSSQL_SA_PASSWORD" ]; then
     
     # Substitute the variable in the .env file, making sure to use # as a
     # delimiter for sed and escaping it in the password.
-    sed -i -r -n "s#^(MSSQL_SA_PASSWORD=).*#\1\"${PASSWORD//#/\\#}\"#p" "$BASEMENT_ENV"
+    sed -i -r -n "s#^(MSSQL_SA_PASSWORD=).*#\1\"${PASSWORD//#/\\#}\"#p" "$ENV_FILE"
 fi
 
-docker compose --file "$SCRIPTDIR/basement/docker-compose.yml" pull
-docker compose --file "$SCRIPTDIR/basement/docker-compose.yml" up -d
+docker compose --file "$SCRIPTDIR/docker-compose.yml" pull
+docker compose --file "$SCRIPTDIR/docker-compose.yml" up -d
 
 echo "Platypus installed successfully!"
