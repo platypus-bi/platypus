@@ -38,7 +38,7 @@ function uninstall {
 
 root_check
 
-read -p "Do you really want to stop and uninstall platypus? (y/N)" -n 1 -r
+read -p "Do you really want to stop and uninstall platypus? [y/N] " -n 1 -r
 echo ""
 
 if [[ $REPLY =~ ^[Yy]$ ]]; then
