@@ -83,6 +83,6 @@ if [ -z "$MSSQL_SA_PASSWORD" ]; then
 fi
 
 docker compose --file "$SCRIPTDIR/docker-compose.yml" pull
-docker compose --file "$SCRIPTDIR/docker-compose.yml" up -d
+docker compose --file "$SCRIPTDIR/docker-compose.yml" up -d --build
 
 echo "Platypus installed successfully!"
