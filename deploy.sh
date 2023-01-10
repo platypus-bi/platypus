@@ -40,7 +40,7 @@ function license_prompt_mssql {
 function generate_password {
     if command -v "apg" &>/dev/null; then
         echo "Using apg to generate the password"
-        PASSWORD="$(apg -a 0 -n 1 -m 20 -M ncl)"
+        PASSWORD="$(apg -a 0 -n 1 -m 20 -M SNCL)"
     else
         echo "Falling back to /dev/urandom for password generation"
         PASSWORD="$(< /dev/urandom tr -dc \[:graph:\] | tr -d \" | head -c 16)"
