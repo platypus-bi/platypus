@@ -28,7 +28,7 @@ RUN apt-get update \
 
 
 COPY run.sh /app/
-COPY test.py /app/
+COPY app.py /app/
 COPY crontab /app/
 
 RUN crontab /app/crontab
