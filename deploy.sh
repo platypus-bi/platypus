@@ -38,13 +38,8 @@ function license_prompt_mssql {
 }
 
 function generate_password {
-    if command -v "apg" &>/dev/null; then
-        echo "Using apg to generate the password"
-        PASSWORD="$(apg -a 0 -n 1 -m 20 -M SNCL)"
-    else
-        echo "Falling back to /dev/urandom for password generation"
-        PASSWORD="$(< /dev/urandom tr -dc \[:graph:\] | tr -d \" | head -c 16)"
-    fi
+    echo "Using apg to generate the password"
+    PASSWORD="$(apg -a 0 -n 1 -m 20 -M SNCL)"
     echo "Generated the random password \"$PASSWORD\""
     echo "Please save it for later use"
 }
@@ -53,6 +48,7 @@ check_installed "sed"
 check_installed "dirname"
 check_installed "readlink"
 check_installed "docker"
+check_installed "apg"
 
 SCRIPTDIR=$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")
 
