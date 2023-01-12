@@ -15,11 +15,18 @@ BORIS_IRW_JSON_INDEX = f"{BORIS_IRW_BASE}/index.json"
 
 
 def retrieve_downloaded_datasets(dataset_type: str) -> list[str]:
-    connection: pyodbc.Connection = pyodbc.connect("DSN=MSSQLServerDatabase",
-                                                   user="sa",
-                                                   password=os.environ["MSSQL_SA_PASSWORD"])
-    cursor: pyodbc.Cursor = connection.cursor()
-    cursor.close()
+    connection = connect_to_database()
+    with connection.cursor() as cursor:
+        cursor.execute("USE [BigData]")
+        cursor.execute("SELECT * FROM [dbo].[Datenbestand] WHERE [Datenbestand].[Typ] = ?", dataset_type)
+        print(cursor.fetchall())
+
+
+def connect_to_database(**kwargs) -> pyodbc.Connection:
+    return pyodbc.connect("DSN=MSSQLServerDatabase",
+                          user="sa",
+                          password=os.environ["MSSQL_SA_PASSWORD"],
+                          **kwargs)
 
 
 def download_large_file(url: str, name: Path):
@@ -112,7 +119,28 @@ def download_irw_aktuell(dataset: dict):
         unpack_file(download_path)
 
 
+def run_sql_script(cursor: pyodbc.Cursor, script: str):
+    with open((Path("/app/sql") / script).with_suffix(".sql")) as f:
+        try:
+            for statement in f.read().split("---"):
+                cursor.execute(statement)
+            cursor.commit()
+            print(cursor.messages)
+        except pyodbc.ProgrammingError as e:
+            cursor.rollback()
+            raise e
+
+
+def initialize_database():
+    with connect_to_database(autocommit=True) as connection:
+        with connection.cursor() as cursor:
+            run_sql_script(cursor, "01-create-database")
+            run_sql_script(cursor, "02-create-table-types")
+            run_sql_script(cursor, "03-create-table-stockpile")
+
+
 def main():
+    initialize_database()
     retrieve_downloaded_datasets("BRW")
     download_brw()
     download_irw()
