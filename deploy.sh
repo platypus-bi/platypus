@@ -39,7 +39,7 @@ function license_prompt_mssql {
 
 function generate_password {
     echo "Using apg to generate the password"
-    PASSWORD="$(apg -a 0 -n 1 -m 20 -M SNCL)"
+    PASSWORD="$(apg -a 0 -n 1 -m 20 -M SNCL -E \")"
     echo "Generated the random password \"$PASSWORD\""
     echo "Please save it for later use"
 }
