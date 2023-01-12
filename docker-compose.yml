@@ -6,6 +6,11 @@ services:
       args:
         - MSSQL_SA_PASSWORD
     restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - "platypus:/work"
     
   db:
     environment:
@@ -21,3 +26,9 @@ services:
         timeout: 3s
     ports:
       - "1433:1433"
+    volumes:
+      - "sqlvolume:/var/opt/mssql"
+
+volumes:
+  platypus:
+  sqlvolume:
