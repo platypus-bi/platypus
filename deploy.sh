@@ -27,7 +27,7 @@ function check_installed {
 function license_prompt_mssql {
     echo "Please make sure to read the Microsoft SQL Server End-User License Agreement"
     echo "https://go.microsoft.com/fwlink/?linkid=857698"
-    read -p "Do you agree to the license agreement? (y/N)" -n 1 -r
+    read -p "Do you agree to the license agreement? [y/N] " -n 1 -r
     echo ""
 
     if [[ $REPLY =~ ^[Yy]$ ]]; then
