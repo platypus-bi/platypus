@@ -34,6 +34,7 @@ RUN apt-get update \
 COPY run.sh /app/
 COPY app.py /app/
 COPY requirements.txt /app/
+COPY sql /app/sql/
 COPY crontab /app/
 
 RUN crontab /app/crontab
