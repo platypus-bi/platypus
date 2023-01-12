@@ -3,6 +3,8 @@ services:
     build:
       context: platypus
       dockerfile: Dockerfile
+      args:
+        - MSSQL_SA_PASSWORD
     restart: unless-stopped
     
   db:

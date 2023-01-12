@@ -1,8 +1,10 @@
+import os
 from pathlib import Path
 import json
 import requests
 import datetime
 import shutil
+import pyodbc
 from qgis.core import *
 
 BORIS_BRW_BASE = "https://www.opengeodata.nrw.de/produkte/infrastruktur_bauen_wohnen/boris/BRW"
@@ -10,6 +12,14 @@ BORIS_BRW_JSON_INDEX = f"{BORIS_BRW_BASE}/index.json"
 
 BORIS_IRW_BASE = "https://www.opengeodata.nrw.de/produkte/infrastruktur_bauen_wohnen/boris/IRW"
 BORIS_IRW_JSON_INDEX = f"{BORIS_IRW_BASE}/index.json"
+
+
+def retrieve_downloaded_datasets(dataset_type: str) -> list[str]:
+    connection: pyodbc.Connection = pyodbc.connect("DSN=MSSQLServerDatabase",
+                                                   user="sa",
+                                                   password=os.environ["MSSQL_SA_PASSWORD"])
+    cursor: pyodbc.Cursor = connection.cursor()
+    cursor.close()
 
 
 def download_large_file(url: str, name: Path):
@@ -103,6 +113,7 @@ def download_irw_aktuell(dataset: dict):
 
 
 def main():
+    retrieve_downloaded_datasets("BRW")
     download_brw()
     download_irw()
 
