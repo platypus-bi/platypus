@@ -21,7 +21,12 @@ Datasets = dict[str, dict[int, datetime.datetime]]
 
 # Make sure that print is always flushed
 original_print = print
-print = lambda *args, **kwargs: original_print(*args, **kwargs, flush=True)
+
+
+# noinspection PyShadowingBuiltins
+def print(*args, **kwargs):
+    kwargs["flush"] = True
+    original_print(*args, **kwargs)
 
 
 def retrieve_downloaded_datasets(dataset_type: str) -> Datasets:
