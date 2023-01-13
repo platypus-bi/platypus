@@ -86,10 +86,17 @@ def determine_latest_year(dataset_type: str, datasets: dict) -> int:
     return latest_year
 
 
+def determine_year(filename: str) -> int:
+    name_pattern = re.compile(r"(?P<type>[A-Z]{3})_(?P<year>\d{4}).*?\.zip")
+    match = name_pattern.fullmatch(filename)
+    return int(match["year"])
+
+
 def download_datasets(url: str,
                       dataset_type: str,
                       current_datasets: Datasets,
-                      current_callback: Callable[[int, Datasets, dict], None]):
+                      current_callback: Callable[[int, Datasets, dict], None],
+                      history_callback: Callable[[Datasets, dict], None] = None):
     r = requests.get(url)
     index = json.loads(r.text)
 
@@ -101,6 +108,7 @@ def download_datasets(url: str,
             current_callback(latest_year, current_datasets, dataset)
         elif dataset["name"] == f"{dataset_type}_historisch":
             # Alte Datensätze, Jahreszahl im Namen
+            history_callback(current_datasets, dataset)
             pass
         else:
             print("Unbekannter Datensatz", dataset["name"])
@@ -110,14 +118,16 @@ def download_brw(current_brw_datasets: Datasets):
     download_datasets(BORIS_BRW_JSON_INDEX,
                       "BRW",
                       current_brw_datasets,
-                      download_brw_aktuell)
+                      download_brw_aktuell,
+                      download_brw_historisch)
 
 
 def download_irw(current_irw_datasets: Datasets):
     download_datasets(BORIS_IRW_JSON_INDEX,
                       "IRW",
                       current_irw_datasets,
-                      download_irw_aktuell)
+                      download_irw_aktuell,
+                      download_irw_historisch)
 
 
 def save_current_dataset(dataset_type: str, year: int, timestamp: datetime.datetime):
@@ -134,6 +144,39 @@ def save_current_dataset(dataset_type: str, year: int, timestamp: datetime.datet
                     "INSERT INTO [dbo].[Datenbestand] ([TYP], [JAHR], [AKTUALISIERT]) VALUES (?, ?, ?)",
                     (dataset_type, year, timestamp))
             cursor.commit()
+
+
+def download_historisch(base_url: str, dataset_type: str, current_datasets: Datasets, dataset: dict):
+    print("Datensatz herunterladen:", dataset["name"])
+    for file in dataset["files"]:
+        year = determine_year(file["name"])
+        print("Datei von:", file["timestamp"])
+        timestamp = datetime.datetime.fromisoformat(file["timestamp"])
+        timestamp = timestamp.replace(microsecond=0)
+        print("Datei für das Jahr:", year)
+        print("Datei prüfen:", file["name"])
+        print("Datei aktualisiert:", timestamp.isoformat())
+
+        datasets_by_year = current_datasets.get(dataset_type)
+        if datasets_by_year is not None:
+            timestamp_for_year = datasets_by_year.get(year)
+            if timestamp_for_year is not None:
+                print("Datei bereits vorhanden:", timestamp_for_year.isoformat())
+                if timestamp_for_year >= timestamp:
+                    print("Datei noch aktuell, überspringe...")
+                    return
+
+        print("Datei herunterladen:", file["name"])
+
+        download_dir = Path(".") / str(year) / dataset_type
+        download_dir.mkdir(parents=True, exist_ok=True)
+        download_path = download_dir / file["name"]
+        download_large_file(f"{base_url}/{file['name']}", download_path)
+        print("Datei herunterladen:", file["name"], "fertig")
+        print("Entpacke:", file["name"])
+        unpack_file(year, download_path)
+        print("Datei entpackt und bereinigt:", file["name"])
+        save_current_dataset(dataset_type, year, timestamp)
 
 
 def download_aktuell(base_url: str, dataset_type: str, latest_year: int, current_datasets: Datasets, dataset: dict):
@@ -176,8 +219,16 @@ def download_brw_aktuell(latest_year: int, current_datasets: Datasets, dataset: 
     download_aktuell(BORIS_BRW_BASE, "BRW", latest_year, current_datasets, dataset)
 
 
+def download_brw_historisch(current_datasets: Datasets, dataset: dict):
+    download_historisch(BORIS_BRW_BASE, "BRW", current_datasets, dataset)
+
+
 def download_irw_aktuell(latest_year: int, current_datasets: Datasets, dataset: dict):
     download_aktuell(BORIS_IRW_BASE, "IRW", latest_year, current_datasets, dataset)
+
+
+def download_irw_historisch(current_datasets: Datasets, dataset: dict):
+    download_historisch(BORIS_IRW_BASE, "IRW", current_datasets, dataset)
 
 
 def run_sql_script(cursor: pyodbc.Cursor, script: str):
