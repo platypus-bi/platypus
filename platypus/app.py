@@ -108,41 +108,45 @@ def determine_year(filename: str) -> int:
 def download_datasets(url: str,
                       dataset_type: str,
                       current_datasets: Datasets,
-                      current_callback: Callable[[int, Datasets, dict], None],
-                      history_callback: Callable[[Datasets, dict], None] = None):
+                      current_callback: Callable[[int, Datasets, dict, list[int]], None],
+                      history_callback: Callable[[Datasets, dict, list[int]], None] = None) -> list[int]:
     r = requests.get(url)
     index = json.loads(r.text)
+
+    downloaded_years = []
 
     latest_year = determine_latest_year(dataset_type, index["datasets"])
 
     for dataset in index["datasets"]:
         if dataset["name"] == f"{dataset_type}_aktuell":
             # Aktueller Datensatz, keine Jahreszahl im Namen
-            current_callback(latest_year, current_datasets, dataset)
+            current_callback(latest_year, current_datasets, dataset, downloaded_years)
         elif dataset["name"] == f"{dataset_type}_historisch":
             if os.environ["ENABLE_HISTORIC_DATASETS"] == "1":
                 # Alte Datensätze, Jahreszahl im Namen
-                history_callback(current_datasets, dataset)
+                history_callback(current_datasets, dataset, downloaded_years)
             else:
                 print("Historische Datensätze werden nicht heruntergeladen")
         else:
             print("Unbekannter Datensatz", dataset["name"])
 
-
-def download_brw(current_brw_datasets: Datasets):
-    download_datasets(BORIS_BRW_JSON_INDEX,
-                      "BRW",
-                      current_brw_datasets,
-                      download_brw_aktuell,
-                      download_brw_historisch)
+    return downloaded_years
 
 
-def download_irw(current_irw_datasets: Datasets):
-    download_datasets(BORIS_IRW_JSON_INDEX,
-                      "IRW",
-                      current_irw_datasets,
-                      download_irw_aktuell,
-                      download_irw_historisch)
+def download_brw(current_brw_datasets: Datasets) -> list[int]:
+    return download_datasets(BORIS_BRW_JSON_INDEX,
+                             "BRW",
+                             current_brw_datasets,
+                             download_brw_aktuell,
+                             download_brw_historisch)
+
+
+def download_irw(current_irw_datasets: Datasets) -> list[int]:
+    return download_datasets(BORIS_IRW_JSON_INDEX,
+                             "IRW",
+                             current_irw_datasets,
+                             download_irw_aktuell,
+                             download_irw_historisch)
 
 
 def save_current_dataset(dataset_type: str, year: int, timestamp: datetime.datetime):
@@ -161,7 +165,11 @@ def save_current_dataset(dataset_type: str, year: int, timestamp: datetime.datet
             cursor.commit()
 
 
-def download_historisch(base_url: str, dataset_type: str, current_datasets: Datasets, dataset: dict):
+def download_historisch(base_url: str,
+                        dataset_type: str,
+                        current_datasets: Datasets,
+                        dataset: dict,
+                        downloaded_years: list[int]):
     print("Datensatz herunterladen:", dataset["name"])
     for file in dataset["files"]:
         year = determine_year(file["name"])
@@ -192,9 +200,15 @@ def download_historisch(base_url: str, dataset_type: str, current_datasets: Data
         unpack_file(year, download_path)
         print("Datei entpackt und bereinigt:", file["name"])
         save_current_dataset(dataset_type, year, timestamp)
+        downloaded_years.append(year)
 
 
-def download_aktuell(base_url: str, dataset_type: str, latest_year: int, current_datasets: Datasets, dataset: dict):
+def download_aktuell(base_url: str,
+                     dataset_type: str,
+                     latest_year: int,
+                     current_datasets: Datasets,
+                     dataset: dict,
+                     downloaded_years: list[int]):
     print("Datensatz herunterladen:", dataset["name"])
     for file in dataset["files"]:
         print("Datei von:", file["timestamp"])
@@ -228,22 +242,23 @@ def download_aktuell(base_url: str, dataset_type: str, latest_year: int, current
         unpack_file(latest_year, download_path)
         print("Datei entpackt und bereinigt:", file["name"])
         save_current_dataset(dataset_type, latest_year, timestamp)
+        downloaded_years.append(latest_year)
 
 
-def download_brw_aktuell(latest_year: int, current_datasets: Datasets, dataset: dict):
-    download_aktuell(BORIS_BRW_BASE, "BRW", latest_year, current_datasets, dataset)
+def download_brw_aktuell(latest_year: int, current_datasets: Datasets, dataset: dict, downloaded_years: list[int]):
+    download_aktuell(BORIS_BRW_BASE, "BRW", latest_year, current_datasets, dataset, downloaded_years)
 
 
-def download_brw_historisch(current_datasets: Datasets, dataset: dict):
-    download_historisch(BORIS_BRW_BASE, "BRW", current_datasets, dataset)
+def download_brw_historisch(current_datasets: Datasets, dataset: dict, downloaded_years: list[int]):
+    download_historisch(BORIS_BRW_BASE, "BRW", current_datasets, dataset, downloaded_years)
 
 
-def download_irw_aktuell(latest_year: int, current_datasets: Datasets, dataset: dict):
-    download_aktuell(BORIS_IRW_BASE, "IRW", latest_year, current_datasets, dataset)
+def download_irw_aktuell(latest_year: int, current_datasets: Datasets, dataset: dict, downloaded_years: list[int]):
+    download_aktuell(BORIS_IRW_BASE, "IRW", latest_year, current_datasets, dataset, downloaded_years)
 
 
-def download_irw_historisch(current_datasets: Datasets, dataset: dict):
-    download_historisch(BORIS_IRW_BASE, "IRW", current_datasets, dataset)
+def download_irw_historisch(current_datasets: Datasets, dataset: dict, downloaded_years: list[int]):
+    download_historisch(BORIS_IRW_BASE, "IRW", current_datasets, dataset, downloaded_years)
 
 
 def run_sql_script(cursor: pyodbc.Cursor, script: str):
@@ -265,7 +280,7 @@ def initialize_database():
             run_sql_script(cursor, "03-create-table-stockpile")
 
 
-def process_years():
+def process_years(years: set[int]):
     brw_datasets = retrieve_downloaded_datasets("BRW")
     irw_datasets = retrieve_downloaded_datasets("IRW")
 
@@ -279,8 +294,8 @@ def process_years():
 
     Path("intersection").mkdir(parents=True, exist_ok=True)
 
-    for year in brw_datasets.keys():
-        if year in irw_datasets:
+    for year in years:
+        if year in brw_datasets and year in irw_datasets:
             output_dir = Path("intersection") / str(year)
             output_dir.mkdir(parents=True, exist_ok=True)
             output_dir = output_dir.absolute()
@@ -326,10 +341,10 @@ def main():
     irw_datasets = retrieve_downloaded_datasets("IRW")
     print("Vorhandene BRW Datensätze:", brw_datasets)
     print("Vorhandene IRW Datensätze:", irw_datasets)
-    download_brw(brw_datasets)
-    download_irw(irw_datasets)
+    downloaded_brw = download_brw(brw_datasets)
+    downloaded_irw = download_irw(irw_datasets)
 
-    process_years()
+    process_years(set(downloaded_brw).union(downloaded_irw))
 
 
 if __name__ == "__main__":
