@@ -1,4 +1,5 @@
 import datetime
+import enum
 import json
 import os
 import re
@@ -16,7 +17,11 @@ BORIS_BRW_JSON_INDEX = f"{BORIS_BRW_BASE}/index.json"
 BORIS_IRW_BASE = "https://www.opengeodata.nrw.de/produkte/infrastruktur_bauen_wohnen/boris/IRW"
 BORIS_IRW_JSON_INDEX = f"{BORIS_IRW_BASE}/index.json"
 
-Datasets = dict[str, dict[int, datetime.datetime]]
+ZIP_NAME_PATTERN = re.compile(r"(?P<type>[A-Z]{3})_(?P<year>\d{4}).*?\.zip")
+
+Year = int
+DatasetType = str
+Datasets = dict[DatasetType, dict[Year, datetime.datetime]]
 
 # Make sure that print is always flushed
 original_print = print
@@ -28,7 +33,7 @@ def print(*args, **kwargs):
     original_print(*args, **kwargs)
 
 
-def retrieve_downloaded_datasets(dataset_type: str) -> Datasets:
+def retrieve_downloaded_datasets(dataset_type: DatasetType) -> Datasets:
     connection = connect_to_database()
     cursor: pyodbc.Cursor
     with connection.cursor() as cursor:
@@ -64,7 +69,7 @@ def download_large_file(url: str, name: Path):
                 file.write(chunk)
 
 
-def unpack_file(year: int, path: Path):
+def unpack_file(path: Path):
     # Unpack the zip file using the zipfile module
     # Unpack into a folder with the same name as the zip file (without the .zip extension)
     # Only unpack files that are not PDF, TXT and XLS files
@@ -79,15 +84,14 @@ def unpack_file(year: int, path: Path):
     path.unlink()
 
 
-def determine_latest_year(dataset_type: str, datasets: dict) -> int:
+def determine_latest_year(dataset_type: DatasetType, datasets: dict) -> Year:
     latest_year = 0
-    name_pattern = re.compile(r"(?P<type>[A-Z]{3})_(?P<year>\d{4}).*?\.zip")
     for dataset in datasets:
         if dataset["name"] == f"{dataset_type}_historisch":
             files = dataset["files"]
             for file in files:
                 filename = file["name"]
-                match = name_pattern.fullmatch(filename)
+                match = ZIP_NAME_PATTERN.fullmatch(filename)
                 current_year = int(match["year"])
                 if latest_year < current_year:
                     latest_year = current_year
@@ -98,17 +102,16 @@ def determine_latest_year(dataset_type: str, datasets: dict) -> int:
     return latest_year
 
 
-def determine_year(filename: str) -> int:
-    name_pattern = re.compile(r"(?P<type>[A-Z]{3})_(?P<year>\d{4}).*?\.zip")
-    match = name_pattern.fullmatch(filename)
+def determine_year(filename: str) -> Year:
+    match = ZIP_NAME_PATTERN.fullmatch(filename)
     return int(match["year"])
 
 
 def download_datasets(url: str,
-                      dataset_type: str,
+                      dataset_type: DatasetType,
                       current_datasets: Datasets,
-                      current_callback: Callable[[int, Datasets, dict, list[int]], None],
-                      history_callback: Callable[[Datasets, dict, list[int]], None] = None) -> list[int]:
+                      current_callback: Callable[[Year, Datasets, dict, list[Year]], None],
+                      history_callback: Callable[[Datasets, dict, list[Year]], None]) -> list[Year]:
     r = requests.get(url)
     index = json.loads(r.text)
 
@@ -132,7 +135,7 @@ def download_datasets(url: str,
     return downloaded_years
 
 
-def download_brw(current_brw_datasets: Datasets) -> list[int]:
+def download_brw(current_brw_datasets: Datasets) -> list[Year]:
     return download_datasets(BORIS_BRW_JSON_INDEX,
                              "BRW",
                              current_brw_datasets,
@@ -140,7 +143,7 @@ def download_brw(current_brw_datasets: Datasets) -> list[int]:
                              download_brw_historisch)
 
 
-def download_irw(current_irw_datasets: Datasets) -> list[int]:
+def download_irw(current_irw_datasets: Datasets) -> list[Year]:
     return download_datasets(BORIS_IRW_JSON_INDEX,
                              "IRW",
                              current_irw_datasets,
@@ -148,7 +151,7 @@ def download_irw(current_irw_datasets: Datasets) -> list[int]:
                              download_irw_historisch)
 
 
-def save_current_dataset(dataset_type: str, year: int, timestamp: datetime.datetime):
+def save_current_dataset(dataset_type: DatasetType, year: Year, timestamp: datetime.datetime):
     with connect_to_database() as connection:
         cursor: pyodbc.Cursor
         with connection.cursor() as cursor:
@@ -165,10 +168,10 @@ def save_current_dataset(dataset_type: str, year: int, timestamp: datetime.datet
 
 
 def download_historisch(base_url: str,
-                        dataset_type: str,
+                        dataset_type: DatasetType,
                         current_datasets: Datasets,
                         dataset: dict,
-                        downloaded_years: list[int]):
+                        downloaded_years: list[Year]):
     print("Datensatz herunterladen:", dataset["name"])
     for file in dataset["files"]:
         year = determine_year(file["name"])
@@ -196,18 +199,18 @@ def download_historisch(base_url: str,
         download_large_file(f"{base_url}/{file['name']}", download_path)
         print("Datei herunterladen:", file["name"], "fertig")
         print("Entpacke:", file["name"])
-        unpack_file(year, download_path)
+        unpack_file(download_path)
         print("Datei entpackt und bereinigt:", file["name"])
         save_current_dataset(dataset_type, year, timestamp)
         downloaded_years.append(year)
 
 
 def download_aktuell(base_url: str,
-                     dataset_type: str,
-                     latest_year: int,
+                     dataset_type: DatasetType,
+                     latest_year: Year,
                      current_datasets: Datasets,
                      dataset: dict,
-                     downloaded_years: list[int]):
+                     downloaded_years: list[Year]):
     print("Datensatz herunterladen:", dataset["name"])
     for file in dataset["files"]:
         print("Datei von:", file["timestamp"])
@@ -238,25 +241,25 @@ def download_aktuell(base_url: str,
         # Old name: BRW_EPSG25832_Shape.zip
         # New name: BRW_2022_EPSG25832_Shape.zip
         download_path = download_path.rename(download_dir / f"{dataset_type}_{latest_year}_EPSG25832_Shape.zip")
-        unpack_file(latest_year, download_path)
+        unpack_file(download_path)
         print("Datei entpackt und bereinigt:", file["name"])
         save_current_dataset(dataset_type, latest_year, timestamp)
         downloaded_years.append(latest_year)
 
 
-def download_brw_aktuell(latest_year: int, current_datasets: Datasets, dataset: dict, downloaded_years: list[int]):
+def download_brw_aktuell(latest_year: Year, current_datasets: Datasets, dataset: dict, downloaded_years: list[Year]):
     download_aktuell(BORIS_BRW_BASE, "BRW", latest_year, current_datasets, dataset, downloaded_years)
 
 
-def download_brw_historisch(current_datasets: Datasets, dataset: dict, downloaded_years: list[int]):
+def download_brw_historisch(current_datasets: Datasets, dataset: dict, downloaded_years: list[Year]):
     download_historisch(BORIS_BRW_BASE, "BRW", current_datasets, dataset, downloaded_years)
 
 
-def download_irw_aktuell(latest_year: int, current_datasets: Datasets, dataset: dict, downloaded_years: list[int]):
+def download_irw_aktuell(latest_year: Year, current_datasets: Datasets, dataset: dict, downloaded_years: list[Year]):
     download_aktuell(BORIS_IRW_BASE, "IRW", latest_year, current_datasets, dataset, downloaded_years)
 
 
-def download_irw_historisch(current_datasets: Datasets, dataset: dict, downloaded_years: list[int]):
+def download_irw_historisch(current_datasets: Datasets, dataset: dict, downloaded_years: list[Year]):
     download_historisch(BORIS_IRW_BASE, "IRW", current_datasets, dataset, downloaded_years)
 
 
@@ -279,7 +282,7 @@ def initialize_database():
             run_sql_script(cursor, "03-create-table-stockpile")
 
 
-def process_years(years: set[int]):
+def process_years(years: set[Year]):
     brw_datasets = retrieve_downloaded_datasets("BRW")
     irw_datasets = retrieve_downloaded_datasets("IRW")
 
@@ -299,9 +302,6 @@ def process_years(years: set[int]):
             output_dir.mkdir(parents=True, exist_ok=True)
             output_dir = output_dir.absolute()
             output_file = str(output_dir / f"intersection_{year}.shp")
-
-            brw_dataset = brw_datasets[year]
-            irw_dataset = irw_datasets[year]
 
             brw_path = Path(".") / str(year) / "BRW" / f"BRW_{year}_EPSG25832_Shape" / f"BRW_{year}_Polygon.shp"
             brw_path = brw_path.absolute()
