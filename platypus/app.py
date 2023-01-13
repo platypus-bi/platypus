@@ -36,8 +36,16 @@ def retrieve_downloaded_datasets(dataset_type: str) -> Datasets:
         cursor.execute("USE [BigData]")
         cursor.execute("SELECT * FROM [Datenbestand] WHERE [Datenbestand].[Typ] = ?", dataset_type)
 
-        return {dateset_type: {year: last_updated.replace(microsecond=0)} for year, dateset_type, last_updated in
-                cursor.fetchall()}
+        rows = cursor.fetchall()
+        datasets = {}
+        for row in rows:
+            year = row[0]
+            dataset_type = row[1]
+            last_updated = row[2].replace(microsecond=0)
+            if dataset_type not in datasets:
+                datasets[dataset_type] = {}
+            datasets[dataset_type][year] = last_updated
+        return datasets
 
 
 def connect_to_database(**kwargs) -> pyodbc.Connection:
