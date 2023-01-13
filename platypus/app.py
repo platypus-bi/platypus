@@ -2,11 +2,10 @@ import datetime
 import json
 import os
 import re
-import shutil
+import subprocess
 import zipfile
 from pathlib import Path
 from typing import Callable
-import subprocess
 
 import pyodbc
 import requests
