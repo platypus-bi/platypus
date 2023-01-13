@@ -5,6 +5,8 @@ services:
       dockerfile: Dockerfile
       args:
         - MSSQL_SA_PASSWORD
+    environment:
+      ENABLE_HISTORIC_DATASETS: "0"
     restart: unless-stopped
     depends_on:
       db:

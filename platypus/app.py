@@ -120,9 +120,11 @@ def download_datasets(url: str,
             # Aktueller Datensatz, keine Jahreszahl im Namen
             current_callback(latest_year, current_datasets, dataset)
         elif dataset["name"] == f"{dataset_type}_historisch":
-            # Alte Datensätze, Jahreszahl im Namen
-            history_callback(current_datasets, dataset)
-            pass
+            if os.environ["ENABLE_HISTORIC_DATASETS"] == "1":
+                # Alte Datensätze, Jahreszahl im Namen
+                history_callback(current_datasets, dataset)
+            else:
+                print("Historische Datensätze werden nicht heruntergeladen")
         else:
             print("Unbekannter Datensatz", dataset["name"])
 
