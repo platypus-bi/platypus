@@ -1,11 +1,15 @@
-import os
-from pathlib import Path
-import json
-import requests
 import datetime
+import json
+import os
+import re
 import shutil
+import zipfile
+from pathlib import Path
+from typing import Callable
+import subprocess
+
 import pyodbc
-from qgis.core import *
+import requests
 
 BORIS_BRW_BASE = "https://www.opengeodata.nrw.de/produkte/infrastruktur_bauen_wohnen/boris/BRW"
 BORIS_BRW_JSON_INDEX = f"{BORIS_BRW_BASE}/index.json"
@@ -13,13 +17,22 @@ BORIS_BRW_JSON_INDEX = f"{BORIS_BRW_BASE}/index.json"
 BORIS_IRW_BASE = "https://www.opengeodata.nrw.de/produkte/infrastruktur_bauen_wohnen/boris/IRW"
 BORIS_IRW_JSON_INDEX = f"{BORIS_IRW_BASE}/index.json"
 
+Datasets = dict[str, dict[int, datetime.datetime]]
 
-def retrieve_downloaded_datasets(dataset_type: str) -> list[str]:
+# Make sure that print is always flushed
+original_print = print
+print = lambda *args, **kwargs: original_print(*args, **kwargs, flush=True)
+
+
+def retrieve_downloaded_datasets(dataset_type: str) -> Datasets:
     connection = connect_to_database()
+    cursor: pyodbc.Cursor
     with connection.cursor() as cursor:
         cursor.execute("USE [BigData]")
-        cursor.execute("SELECT * FROM [dbo].[Datenbestand] WHERE [Datenbestand].[Typ] = ?", dataset_type)
-        print(cursor.fetchall())
+        cursor.execute("SELECT * FROM [Datenbestand] WHERE [Datenbestand].[Typ] = ?", dataset_type)
+
+        return {dateset_type: {year: last_updated.replace(microsecond=0)} for year, dateset_type, last_updated in
+                cursor.fetchall()}
 
 
 def connect_to_database(**kwargs) -> pyodbc.Connection:
@@ -39,84 +52,132 @@ def download_large_file(url: str, name: Path):
                 file.write(chunk)
 
 
-def unpack_file(path: Path):
-    # Unpack the path as a zip file using shutil
-    # The contents of the zip file will be extracted to 
-    # a directory with the same name as the zip file
-    # without the .zip extension
-    shutil.unpack_archive(path, path.with_suffix(""))
+def unpack_file(year: int, path: Path):
+    # Unpack the zip file using the zipfile module
+    # Unpack into a folder with the same name as the zip file (without the .zip extension)
+    # Only unpack files that are not PDF, TXT and XLS files
+
+    output_folder = path.parent / path.stem
+
+    with zipfile.ZipFile(path, "r") as zip_file:
+        for file in zip_file.namelist():
+            if not file.endswith(".pdf") and not file.endswith(".txt") and not file.endswith(".xls"):
+                zip_file.extract(file, output_folder)
     # Delete the zip file
     path.unlink()
 
 
-def download_brw():
-    # Download the index.json file using requests
-    r = requests.get(BORIS_BRW_JSON_INDEX)
-    # Convert the JSON string to a Python dictionary
+def determine_latest_year(dataset_type: str, datasets: dict) -> int:
+    latest_year = 0
+    name_pattern = re.compile(r"(?P<type>[A-Z]{3})_(?P<year>\d{4}).*?\.zip")
+    for dataset in datasets:
+        if dataset["name"] == f"{dataset_type}_historisch":
+            files = dataset["files"]
+            for file in files:
+                filename = file["name"]
+                match = name_pattern.fullmatch(filename)
+                current_year = int(match["year"])
+                if latest_year < current_year:
+                    latest_year = current_year
+    if latest_year == 0:
+        latest_year = datetime.datetime.now().year
+    else:
+        latest_year += 1
+    return latest_year
+
+
+def download_datasets(url: str,
+                      dataset_type: str,
+                      current_datasets: Datasets,
+                      current_callback: Callable[[int, Datasets, dict], None]):
+    r = requests.get(url)
     index = json.loads(r.text)
 
-    print(index["datasets"])
+    latest_year = determine_latest_year(dataset_type, index["datasets"])
+
     for dataset in index["datasets"]:
-        if dataset["name"] == "BRW_aktuell":
+        if dataset["name"] == f"{dataset_type}_aktuell":
             # Aktueller Datensatz, keine Jahreszahl im Namen
-            download_brw_aktuell(dataset)
-        elif dataset["name"] == "BRW_historisch":
+            current_callback(latest_year, current_datasets, dataset)
+        elif dataset["name"] == f"{dataset_type}_historisch":
             # Alte Datensätze, Jahreszahl im Namen
             pass
         else:
             print("Unbekannter Datensatz", dataset["name"])
 
 
-def download_irw():
-    # Download the index.json file using requests
-    r = requests.get(BORIS_IRW_JSON_INDEX)
-    # Convert the JSON string to a Python dictionary
-    index = json.loads(r.text)
-
-    print(index["datasets"])
-    for dataset in index["datasets"]:
-        if dataset["name"] == "IRW_aktuell":
-            # Aktueller Datensatz, keine Jahreszahl im Namen
-            download_irw_aktuell(dataset)
-        elif dataset["name"] == "IRW_historisch":
-            # Alte Datensätze, Jahreszahl im Namen
-            pass
-        else:
-            print("Unbekannter Datensatz", dataset["name"])
+def download_brw(current_brw_datasets: Datasets):
+    download_datasets(BORIS_BRW_JSON_INDEX,
+                      "BRW",
+                      current_brw_datasets,
+                      download_brw_aktuell)
 
 
-def download_brw_aktuell(dataset: dict):
+def download_irw(current_irw_datasets: Datasets):
+    download_datasets(BORIS_IRW_JSON_INDEX,
+                      "IRW",
+                      current_irw_datasets,
+                      download_irw_aktuell)
+
+
+def save_current_dataset(dataset_type: str, year: int, timestamp: datetime.datetime):
+    with connect_to_database() as connection:
+        cursor: pyodbc.Cursor
+        with connection.cursor() as cursor:
+            cursor.execute("USE [BigData]")
+            cursor.execute("SELECT * FROM [dbo].[Datenbestand] WHERE [TYP] = ? AND [JAHR] = ?", (dataset_type, year))
+            if cursor.fetchone():
+                cursor.execute("UPDATE [dbo].[Datenbestand] SET [AKTUALISIERT] = ? WHERE [TYP] = ? AND [JAHR] = ?",
+                               (timestamp, dataset_type, year))
+            else:
+                cursor.execute(
+                    "INSERT INTO [dbo].[Datenbestand] ([TYP], [JAHR], [AKTUALISIERT]) VALUES (?, ?, ?)",
+                    (dataset_type, year, timestamp))
+            cursor.commit()
+
+
+def download_aktuell(base_url: str, dataset_type: str, latest_year: int, current_datasets: Datasets, dataset: dict):
     print("Datensatz herunterladen:", dataset["name"])
     for file in dataset["files"]:
         print("Datei von:", file["timestamp"])
-        year = datetime.datetime.fromisoformat(file["timestamp"]).year
-        print("Datei für das Jahr:", year)
+        timestamp = datetime.datetime.fromisoformat(file["timestamp"])
+        timestamp = timestamp.replace(microsecond=0)
+        print("Datei für das Jahr:", latest_year)
+        print("Datei prüfen:", file["name"])
+        print("Datei aktualisiert:", timestamp.isoformat())
+
+        datasets_by_year = current_datasets.get(dataset_type)
+        if datasets_by_year is not None:
+            timestamp_for_year = datasets_by_year.get(latest_year)
+            if timestamp_for_year is not None:
+                print("Datei bereits vorhanden:", timestamp_for_year.isoformat())
+                if timestamp_for_year >= timestamp:
+                    print("Datei noch aktuell, überspringe...")
+                    return
+
         print("Datei herunterladen:", file["name"])
 
-        download_dir = Path(".") / str(year) / "BRW"
+        download_dir = Path(".") / str(latest_year) / dataset_type
         download_dir.mkdir(parents=True, exist_ok=True)
         download_path = download_dir / file["name"]
-        download_large_file(f"{BORIS_BRW_BASE}/{file['name']}", download_path)
+        download_large_file(f"{base_url}/{file['name']}", download_path)
         print("Datei herunterladen:", file["name"], "fertig")
         print("Entpacke:", file["name"])
-        unpack_file(download_path)
+
+        # Old name: BRW_EPSG25832_Shape.zip
+        # New name: BRW_2022_EPSG25832_Shape.zip
+        download_path = download_path.rename(download_dir / f"{dataset_type}_{latest_year}_EPSG25832_Shape.zip")
+        unpack_file(latest_year, download_path)
+        print("Datei entpackt und bereinigt:", file["name"])
+        save_current_dataset(dataset_type, latest_year, timestamp)
 
 
-def download_irw_aktuell(dataset: dict):
-    print("Datensatz herunterladen:", dataset["name"])
-    for file in dataset["files"]:
-        print("Datei von:", file["timestamp"])
-        year = datetime.datetime.fromisoformat(file["timestamp"]).year
-        print("Datei für das Jahr:", year)
-        print("Datei herunterladen:", file["name"])
+def download_brw_aktuell(latest_year: int, current_datasets: Datasets, dataset: dict):
+    download_aktuell(BORIS_BRW_BASE, "BRW", latest_year, current_datasets, dataset)
 
-        download_dir = Path(".") / str(year) / "IRW"
-        download_dir.mkdir(parents=True, exist_ok=True)
-        download_path = download_dir / file["name"]
-        download_large_file(f"{BORIS_IRW_BASE}/{file['name']}", download_path)
-        print("Datei herunterladen:", file["name"], "fertig")
-        print("Entpacke:", file["name"])
-        unpack_file(download_path)
+
+def download_irw_aktuell(latest_year: int, current_datasets: Datasets, dataset: dict):
+    download_aktuell(BORIS_IRW_BASE, "IRW", latest_year, current_datasets, dataset)
 
 
 def run_sql_script(cursor: pyodbc.Cursor, script: str):
@@ -125,7 +186,6 @@ def run_sql_script(cursor: pyodbc.Cursor, script: str):
             for statement in f.read().split("---"):
                 cursor.execute(statement)
             cursor.commit()
-            print(cursor.messages)
         except pyodbc.ProgrammingError as e:
             cursor.rollback()
             raise e
@@ -139,11 +199,71 @@ def initialize_database():
             run_sql_script(cursor, "03-create-table-stockpile")
 
 
+def process_years():
+    brw_datasets = retrieve_downloaded_datasets("BRW")
+    irw_datasets = retrieve_downloaded_datasets("IRW")
+
+    brw_datasets = brw_datasets.get("BRW")
+    if brw_datasets is None:
+        return
+
+    irw_datasets = irw_datasets.get("IRW")
+    if irw_datasets is None:
+        return
+
+    Path("intersection").mkdir(parents=True, exist_ok=True)
+
+    for year in brw_datasets.keys():
+        if year in irw_datasets:
+            output_dir = Path("intersection") / str(year)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_dir = output_dir.absolute()
+            output_file = str(output_dir / f"intersection_{year}.shp")
+
+            brw_dataset = brw_datasets[year]
+            irw_dataset = irw_datasets[year]
+
+            brw_path = Path(".") / str(year) / "BRW" / f"BRW_{year}_EPSG25832_Shape" / f"BRW_{year}_Polygon.shp"
+            brw_path = brw_path.absolute()
+            irw_path = Path(".") / str(year) / "IRW" / f"IRW_{year}_EPSG25832_Shape" / f"IRW_{year}_Polygon.shp"
+            irw_path = irw_path.absolute()
+
+            print(f"Verarbeite {year}...")
+            now = datetime.datetime.now()
+            subprocess.run([
+                "qgis_process.bin",
+                "run",
+                "native:intersection",
+                f"INPUT={brw_path}",
+                f"OVERLAY={irw_path}",
+                f"OUTPUT={output_file}"
+            ])
+            print(f"Verarbeitung von {year} abgeschlossen in {(datetime.datetime.now() - now).seconds} Sekunden")
+
+            # Create CSV
+            print(f"Erstelle CSV für {year}...")
+            now = datetime.datetime.now()
+            subprocess.run([
+                "qgis_process.bin",
+                "run",
+                "native:savefeatures",
+                f"INPUT={output_file}",
+                f"OUTPUT={output_dir / f'intersection_{year}.csv'}",
+                "GEOMETRY=AS_WKT",
+            ])
+            print(f"CSV für {year} erstellt in {(datetime.datetime.now() - now).seconds} Sekunden")
+
+
 def main():
     initialize_database()
-    retrieve_downloaded_datasets("BRW")
-    download_brw()
-    download_irw()
+    brw_datasets = retrieve_downloaded_datasets("BRW")
+    irw_datasets = retrieve_downloaded_datasets("IRW")
+    print("Vorhandene BRW Datensätze:", brw_datasets)
+    print("Vorhandene IRW Datensätze:", irw_datasets)
+    download_brw(brw_datasets)
+    download_irw(irw_datasets)
+
+    process_years()
 
 
 if __name__ == "__main__":
