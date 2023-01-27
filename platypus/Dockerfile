@@ -20,7 +20,7 @@ RUN apt-get update \
     && echo "deb [signed-by=/etc/apt/keyrings/qgis-archive-keyring.gpg] https://qgis.org/debian bullseye main" | tee /etc/apt/sources.list.d/qgis.list \
     && apt-get update \
     && apt-get install --no-install-recommends --no-install-suggests -y \
-        qgis python3-pip xauth xvfb \
+        qgis python3-pip python3-numpy python3-pandas python3-pyodbc xauth xvfb \
     && wget -O - https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor -o /etc/apt/keyrings/microsoft.gpg \
     && echo "deb [signed-by=/etc/apt/keyrings/microsoft.gpg arch=amd64] https://packages.microsoft.com/debian/11/prod bullseye main" | tee /etc/apt/sources.list.d/mssql-release.list \
     && apt-get update \
@@ -42,7 +42,6 @@ COPY sql /app/sql/
 COPY crontab /app/
 
 RUN crontab /app/crontab
-RUN pip install -r /app/requirements.txt
 
 # Setup ODBC DSN
 COPY mssql-dsn /app/
