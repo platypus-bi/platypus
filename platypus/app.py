@@ -1,5 +1,4 @@
 import datetime
-import enum
 import json
 import os
 import re
@@ -8,8 +7,10 @@ import zipfile
 from pathlib import Path
 from typing import Callable
 
+import pandas as pd
 import pyodbc
 import requests
+from pandas import DataFrame
 
 BORIS_BRW_BASE = "https://www.opengeodata.nrw.de/produkte/infrastruktur_bauen_wohnen/boris/BRW"
 BORIS_BRW_JSON_INDEX = f"{BORIS_BRW_BASE}/index.json"
@@ -323,15 +324,107 @@ def process_years(years: set[Year]):
             # Create CSV
             print(f"Erstelle CSV für {year}...")
             now = datetime.datetime.now()
+
+            intersection_csv_file = output_dir / f'intersection_{year}.csv'
             subprocess.run([
                 "qgis_process.bin",
                 "run",
                 "native:savefeatures",
                 f"INPUT={output_file}",
-                f"OUTPUT={output_dir / f'intersection_{year}.csv'}",
-                "GEOMETRY=AS_WKT",
+                f"OUTPUT={intersection_csv_file}",
+                "DATASOURCE_OPTIONS=GEOMETRY=AS_WKT",
             ])
             print(f"CSV für {year} erstellt in {(datetime.datetime.now() - now).seconds} Sekunden")
+            intersection_df: DataFrame
+            with open(intersection_csv_file) as csv:
+                intersection_df = pd.read_csv(csv)
+
+            if intersection_df is None:
+                print(f"Keine Daten für {year} vorhanden?!")
+                continue
+
+            # Drop uninteresting columns
+            intersection_df.drop(columns=[
+                "ACZA",
+                "AUFW",
+                "BASBE",
+                "BASMA",
+                "BAUW",
+                "BEDW",
+                "BEIT",
+                "BEM",
+                "BMZ",
+                "BOD",  # Immer leer
+                "BRW",  # Anstelle des BRW, wird HBRW (v4.0) verwendet
+                "BRWZNR",
+                "ERGNUTA",
+                "ERVE",  # Immer leer
+                "FREI",
+                "GABE",
+                "GASL",
+                "GEANT",  # Immer leer
+                "GELA",  # Immer leer
+                "GEMA",
+                "GENA",
+                "GENU",
+                "GESL",
+                "GFZ_TIEFE",
+                "GFZBV",
+                "GRZA",
+                "HTAG",
+                "LUMNUM",
+                "LURT",
+                "ORTST",
+                "PLZ",
+                "STAG",
+                "UDOK",
+                "UDOK_URL",
+                "VERF",
+                "VERG",
+                "VERGNR",
+                "WEER",
+                "WNUM",
+                "XVERG",
+                "YVERG",
+                "XWERT",
+                "YWERT",
+                "ZOG",  # Immer leer
+
+                "BAUGP",  # Immer leer
+                "BEIT_2",
+                "BEM_2",
+                "BGF",  # Immer leer
+                "BOWL",
+                "BRECHV",
+                "FREI_2",
+                "GFLAE",  # Immer leer
+                "GABE_2",
+                "GASL_2",
+                "GBREI_2",  # Immer leer
+                "GEBIET",
+                "GEMA_2",
+                "GENA_2",
+                "GENU_2",
+                "GESL_2",
+                "GFZ_2",  # Immer leer
+                "GRZ_2",  # Immer leer
+                "GTIE_2",  # Immer leer
+                "HGELD",  # Immer leer
+                "JROHNF",
+                "NAME_IRW",
+                "NUMZ",
+                "ORTST_2",
+                "PLZ_2",
+                "RND",
+                "STAG_2",
+                "UDOK_2",
+                "UDOK_URL_2",
+                "WNUM_2",
+                "WOLAKL",  # Immer leer
+                "XWERT_2",
+                "YWERT_2",
+            ], inplace=True)
+            intersection_df.to_csv(intersection_csv_file, index=False)
 
 
 def main():
