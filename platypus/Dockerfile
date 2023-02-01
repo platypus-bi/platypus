@@ -37,7 +37,6 @@ RUN chmod +x /tini
 
 COPY run.sh /app/
 COPY app.py /app/
-COPY requirements.txt /app/
 COPY sql /app/sql/
 COPY crontab /app/
 
