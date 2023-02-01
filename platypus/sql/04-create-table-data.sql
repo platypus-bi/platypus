@@ -1,0 +1,67 @@
+USE [BigData];
+---
+IF OBJECT_ID('Daten', 'U') IS NULL
+    BEGIN
+        CREATE TABLE [dbo].[Daten]
+        (
+            [JAHR]     [int]          NOT NULL,
+            [BEZUG]    [nvarchar](12) NOT NULL,
+            [BRKE]     [int]          NOT NULL,
+            [ENTW]     [nvarchar](2)  NOT NULL,
+            [FARBE]    [int]          NOT NULL,
+            [FLAE]     [nvarchar](12),
+            [GBREI]    [int],
+            [GEZ]      [nvarchar](9),
+            [GFZ]      [decimal](3, 1),
+            [GRZ]      [decimal](2, 1),
+            [GTIE]     [int],
+            [HBRW]     [decimal](7, 2),
+            [NUTA]     [nvarchar](8)  NOT NULL,
+            [WHNLA]    [int],
+            [IMRW]     [int]          NOT NULL,
+            [IRKE]     [int]          NOT NULL,
+            [TEILMA]   [int]          NOT NULL,
+            [OBJGR]    [int],
+            [GART]     [int],
+            [EGART]    [int],
+            [BJ]       [int]          NOT NULL,
+            [WHNFL]    [nvarchar](12),
+            [AKL]      [int],
+            [MTYP]     [int],
+            [KELLER]   [int],
+            [DGA]      [int],
+            [GESLA]    [int],
+            [BK]       [int],
+            [BEHING]   [int],
+            [RANZ]     [int],
+            [WHNA]     [nvarchar](10),
+            [ANZG]     [nvarchar](12),
+            [GRDA]     [int],
+            [FLAE_2]   [nvarchar](12),
+            [MIETS]    [int],
+            [IRWTYP]   [int]          NOT NULL,
+            [BRWTYP]   [int],
+            [NUZFL]    [nvarchar](12),
+            [IMMIS]    [int],
+            [DENKS]    [int],
+            [VERAN]    [int],
+            [BVERU]    [int],
+            [WART]     [int],
+            [GSTAND]   [int],
+            [MGRAD]    [int],
+            [GARSTP]   [int],
+            [ANZEGEB]  [nvarchar](10),
+            [TAGBAD]   [int],
+            [GANU]     [int],
+            [OPTIK]    [int],
+            [ALTERJ]   [int],
+            [WFNF]     [nvarchar](12),
+            [AUFZUG]   [int],
+            [FARBE_2]  [int],
+            [WKT]      [geography]    NOT NULL,
+            [WKT_TEXT] AS [WKT].STAsText()
+        ) ON [PRIMARY]
+
+        CREATE INDEX [IX_JAHR] ON [dbo].[Daten] ([JAHR])
+    END;
+

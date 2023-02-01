@@ -281,6 +281,7 @@ def initialize_database():
             run_sql_script(cursor, "01-create-database")
             run_sql_script(cursor, "02-create-table-types")
             run_sql_script(cursor, "03-create-table-stockpile")
+            run_sql_script(cursor, "04-create-table-data")
 
 
 def process_years(years: set[Year]):

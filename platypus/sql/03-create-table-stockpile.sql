@@ -6,7 +6,7 @@ IF OBJECT_ID('Datenbestand', 'U') IS NULL
         (
             [JAHR]         [int]          NOT NULL,
             [TYP]          [nvarchar](10) NOT NULL,
-            [AKTUALISIERT] [datetime]    NOT NULL,
+            [AKTUALISIERT] [datetime]     NOT NULL,
             CONSTRAINT [PK_Datenbestand] PRIMARY KEY CLUSTERED
                 ([JAHR] ASC, [TYP] ASC) ON [PRIMARY]
         ) ON [PRIMARY]
