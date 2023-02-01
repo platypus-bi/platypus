@@ -394,6 +394,7 @@ def process_years(years: set[Year]):
                 "BAUGP",  # Immer leer
                 "BEIT_2",
                 "BEM_2",
+                "BEZUG_2",  # Entspricht immer BEZUG
                 "BGF",  # Immer leer
                 "BOWL",
                 "BRECHV",
