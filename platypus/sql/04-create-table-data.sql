@@ -8,7 +8,7 @@ IF OBJECT_ID('Daten', 'U') IS NULL
             [BEZUG]   [nvarchar](12) NOT NULL,
             [PLZ]     [nvarchar](5)  NOT NULL,
             [GENA]    [nvarchar](30) NOT NULL,
-            [ORTST]   [nvarchar](60) NOT NULL,
+            [ORTST]   [nvarchar](60),
             [BRKE]    [int]          NOT NULL,
             [ENTW]    [nvarchar](2)  NOT NULL,
             [FARBE]   [int]          NOT NULL,
