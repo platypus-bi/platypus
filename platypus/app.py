@@ -137,10 +137,13 @@ def retrieve_downloaded_datasets(dataset_type: DatasetType) -> Datasets:
 
 
 def connect_to_database(**kwargs) -> pyodbc.Connection:
-    return pyodbc.connect("DSN=MSSQLServerDatabase",
+    conn = pyodbc.connect("DSN=MSSQLServerDatabase",
                           user="sa",
                           password=os.environ["MSSQL_SA_PASSWORD"],
+                          ansi=True,
                           **kwargs)
+    conn.setencoding(encoding='utf-8')
+    return conn
 
 
 def download_large_file(url: str, name: Path):
@@ -281,7 +284,7 @@ def download_historisch(base_url: str,
         download_dir.mkdir(parents=True, exist_ok=True)
         download_path = download_dir / file["name"]
         download_large_file(f"{base_url}/{file['name']}", download_path)
-        print("Datei herunterladen:", file["name"], "fertig")
+        print("Datei heruntergeladen:", file["name"])
         print("Entpacke:", file["name"])
         unpack_file(download_path)
         print("Datei entpackt und bereinigt:", file["name"])
