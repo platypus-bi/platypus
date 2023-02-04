@@ -5,8 +5,9 @@ import re
 import subprocess
 import zipfile
 from pathlib import Path
-from typing import Callable
+from typing import Callable, NamedTuple, Any, Optional
 
+import numpy as np
 import pandas as pd
 import pyodbc
 import requests
@@ -23,6 +24,88 @@ ZIP_NAME_PATTERN = re.compile(r"(?P<type>[A-Z]{3})_(?P<year>\d{4}).*?\.zip")
 Year = int
 DatasetType = str
 Datasets = dict[DatasetType, dict[Year, datetime.datetime]]
+
+Column = NamedTuple("Column", [("name", str), ("conversion", Callable[[str], Any])])
+
+
+def identity(value):
+    return value
+
+
+def parse_float(value) -> Optional[float]:
+    if value:
+        return float(value.replace(",", "."))
+    else:
+        return None
+
+
+def parse_int(value) -> Optional[float]:
+    if value:
+        return int(value)
+    else:
+        return None
+
+
+# Columns to insert into the database
+COLUMNS: list[Column] = [
+    Column("JAHR", identity),
+    Column("BEZUG", identity),
+    Column("BRKE", int),
+    Column("ENTW", identity),
+    Column("FARBE", int),
+    Column("FLAE", identity),
+    Column("GBREI", parse_int),
+    Column("GEZ", identity),
+    Column("GFZ", parse_float),
+    Column("GRZ", parse_float),
+    Column("GTIE", parse_int),
+    Column("HBRW", parse_float),
+    Column("NUTA", identity),
+    Column("WHNLA", parse_int),
+    Column("IMRW", int),
+    Column("IRKE", int),
+    Column("TEILMA", int),
+    Column("OBJGR", parse_int),
+    Column("GART", parse_int),
+    Column("EGART", parse_int),
+    Column("BJ", int),
+    Column("WHNFL", identity),
+    Column("AKL", parse_int),
+    Column("MTYP", parse_int),
+    Column("KELLER", parse_int),
+    Column("DGA", parse_int),
+    Column("GESLA", parse_int),
+    Column("BK", parse_int),
+    Column("BEHING", parse_int),
+    Column("RANZ", parse_int),
+    Column("WHNA", identity),
+    Column("ANZG", identity),
+    Column("GRDA", parse_int),
+    Column("FLAE_2", identity),
+    Column("MIETS", parse_int),
+    Column("IRWTYP", int),
+    Column("BRWTYP", parse_int),
+    Column("NUZFL", identity),
+    Column("IMMIS", parse_int),
+    Column("DENKS", parse_int),
+    Column("VERAN", parse_int),
+    Column("BVERU", parse_int),
+    Column("WART", parse_int),
+    Column("GSTAND", parse_int),
+    Column("MGRAD", parse_int),
+    Column("GARSTP", parse_int),
+    Column("ANZEGEB", identity),
+    Column("TAGBAD", parse_int),
+    Column("GANU", parse_int),
+    Column("OPTIK", parse_int),
+    Column("ALTERJ", parse_int),
+    Column("WFNF", identity),
+    Column("AUFZUG", parse_int),
+    Column("FARBE_2", parse_int),
+    Column("x", parse_float),
+    Column("y", parse_float),
+    Column("WKT", identity),
+]
 
 # Make sure that print is always flushed
 original_print = print
@@ -311,6 +394,7 @@ def process_years(years: set[Year]):
             irw_path = irw_path.absolute()
 
             print(f"Verarbeite {year}...")
+            print("Erzeuge Schnittmenge...")
             now = datetime.datetime.now()
             subprocess.run([
                 "qgis_process.bin",
@@ -320,113 +404,113 @@ def process_years(years: set[Year]):
                 f"OVERLAY={irw_path}",
                 f"OUTPUT={output_file}"
             ])
-            print(f"Verarbeitung von {year} abgeschlossen in {(datetime.datetime.now() - now).seconds} Sekunden")
+            print(f"Erzeugung der Schnittmenge von {year} abgeschlossen in",
+                  (datetime.datetime.now() - now).seconds,
+                  "Sekunden")
+
+            # Convert polygons to centroids
+            print(f"Erstelle Zentroide für {year}...")
+            centroid_file = str(output_dir / f"centroids_{year}.shp")
+            now = datetime.datetime.now()
+            subprocess.run([
+                "qgis_process.bin",
+                "run",
+                "native:pointonsurface",
+                f"INPUT={output_file}",
+                f"OUTPUT={centroid_file}",
+            ])
+            print(f"Zentroide für {year} erstellt in",
+                  (datetime.datetime.now() - now).seconds,
+                  "Sekunden")
+
+            # Add X, Y (latitute, longitude) to CSV
+            print(f"Füge Breitengrad und Längengrad für {year} hinzu...")
+            now = datetime.datetime.now()
+            lat_long_file = str(output_dir / f"lat_long_{year}.shp")
+            subprocess.run([
+                "qgis_process.bin",
+                "run",
+                "native:addxyfields",
+                f"INPUT={centroid_file}",
+                f"OUTPUT={lat_long_file}",
+                "CRS=EPSG:4326"
+            ])
+            print(
+                f"Breitengrad und Längengrad für {year} hinzugefügt in",
+                (datetime.datetime.now() - now).seconds,
+                "Sekunden")
 
             # Create CSV
             print(f"Erstelle CSV für {year}...")
-            now = datetime.datetime.now()
-
             intersection_csv_file = output_dir / f'intersection_{year}.csv'
+            now = datetime.datetime.now()
             subprocess.run([
                 "qgis_process.bin",
                 "run",
                 "native:savefeatures",
-                f"INPUT={output_file}",
+                f"INPUT={lat_long_file}",
                 f"OUTPUT={intersection_csv_file}",
-                "DATASOURCE_OPTIONS=GEOMETRY=AS_WKT",
+                "LAYER_OPTIONS=GEOMETRY=AS_WKT",
             ])
-            print(f"CSV für {year} erstellt in {(datetime.datetime.now() - now).seconds} Sekunden")
+            print(f"CSV für {year} erstellt in",
+                  (datetime.datetime.now() - now).seconds,
+                  "Sekunden")
+
+            # Clean up
+            # This requires deleting all .shp files and their .cpg, .dbf, .prj, .shx files as well
+            for file in output_dir.glob("*.shp"):
+                file.unlink()
+                for extension in (".cpg", ".dbf", ".prj", ".shx"):
+                    (file.with_suffix(extension)).unlink()
+
             intersection_df: DataFrame
             with open(intersection_csv_file) as csv:
-                intersection_df = pd.read_csv(csv)
+                intersection_df = pd.read_csv(csv, dtype=str)
 
             if intersection_df is None:
                 print(f"Keine Daten für {year} vorhanden?!")
                 continue
 
-            # Drop uninteresting columns
-            intersection_df.drop(columns=[
-                "ACZA",
-                "AUFW",
-                "BASBE",
-                "BASMA",
-                "BAUW",
-                "BEDW",
-                "BEIT",
-                "BEM",
-                "BMZ",
-                "BOD",  # Immer leer
-                "BRW",  # Anstelle des BRW, wird HBRW (v4.0) verwendet
-                "BRWZNR",
-                "ERGNUTA",
-                "ERVE",  # Immer leer
-                "FREI",
-                "GABE",
-                "GASL",
-                "GEANT",  # Immer leer
-                "GELA",  # Immer leer
-                "GEMA",
-                "GENA",
-                "GENU",
-                "GESL",
-                "GFZ_TIEFE",
-                "GFZBV",
-                "GRZA",
-                "HTAG",
-                "LUMNUM",
-                "LURT",
-                "ORTST",
-                "PLZ",
-                "STAG",
-                "UDOK",
-                "UDOK_URL",
-                "VERF",
-                "VERG",
-                "VERGNR",
-                "WEER",
-                "WNUM",
-                "XVERG",
-                "YVERG",
-                "XWERT",
-                "YWERT",
-                "ZOG",  # Immer leer
+            # Add year
+            intersection_df["JAHR"] = year
 
-                "BAUGP",  # Immer leer
-                "BEIT_2",
-                "BEM_2",
-                "BEZUG_2",  # Entspricht immer BEZUG
-                "BGF",  # Immer leer
-                "BOWL",
-                "BRECHV",
-                "FREI_2",
-                "GFLAE",  # Immer leer
-                "GABE_2",
-                "GASL_2",
-                "GBREI_2",  # Immer leer
-                "GEBIET",
-                "GEMA_2",
-                "GENA_2",
-                "GENU_2",
-                "GESL_2",
-                "GFZ_2",  # Immer leer
-                "GRZ_2",  # Immer leer
-                "GTIE_2",  # Immer leer
-                "HGELD",  # Immer leer
-                "JROHNF",
-                "NAME_IRW",
-                "NUMZ",
-                "ORTST_2",
-                "PLZ_2",
-                "RND",
-                "STAG_2",
-                "UDOK_2",
-                "UDOK_URL_2",
-                "WNUM_2",
-                "WOLAKL",  # Immer leer
-                "XWERT_2",
-                "YWERT_2",
-            ], inplace=True)
-            intersection_df.to_csv(intersection_csv_file, index=False)
+            # Run transformations
+            for column, transformation in COLUMNS:
+                intersection_df[column] = intersection_df[column].map(transformation, na_action="ignore")
+            intersection_df.fillna(np.nan, inplace=True)
+            intersection_df.replace({np.nan: None}, inplace=True)
+
+            print(intersection_df.max().to_string())
+
+            save_in_database(intersection_df, year)
+
+
+def save_in_database(intersection_df, year):
+    print(f"Speichere {year} in Datenbank...")
+    now = datetime.datetime.now()
+    with connect_to_database() as connection:
+        cursor: pyodbc.Cursor
+        with connection.cursor() as cursor:
+            cursor.fast_executemany = True
+            cursor.execute("USE [BigData]")
+            # Delete old data
+            cursor.execute("DELETE FROM [Daten] WHERE [JAHR] = ?", year)
+
+            columns = str.join(",", (f"[{column.name}]" for column in COLUMNS))
+            placeholders = str.join(",", ("?" for _ in COLUMNS))
+            try:
+                for row in intersection_df[[c.name for c in COLUMNS]].values.tolist():
+                    cursor.execute(
+                        f"INSERT INTO [Daten]({columns}) VALUES({placeholders})",
+                        row)
+                cursor.commit()
+            except pyodbc.DatabaseError as e:
+                cursor.rollback()
+                raise e
+    print(
+        f"Speichern von {year} in Datenbank abgeschlossen in",
+        (datetime.datetime.now() - now).seconds,
+        "Sekunden")
 
 
 def main():
