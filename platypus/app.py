@@ -384,103 +384,184 @@ def process_years(years: set[Year]):
             output_dir = Path("intersection") / str(year)
             output_dir.mkdir(parents=True, exist_ok=True)
             output_dir = output_dir.absolute()
-            output_file = str(output_dir / f"intersection_{year}.shp")
 
             brw_path = Path(".") / str(year) / "BRW" / f"BRW_{year}_EPSG25832_Shape" / f"BRW_{year}_Polygon.shp"
             brw_path = brw_path.absolute()
             irw_path = Path(".") / str(year) / "IRW" / f"IRW_{year}_EPSG25832_Shape" / f"IRW_{year}_Polygon.shp"
             irw_path = irw_path.absolute()
 
-            print(f"Verarbeite {year}...")
-            print("Erzeuge Schnittmenge...")
-            now = datetime.datetime.now()
-            subprocess.run([
-                "qgis_process.bin",
-                "run",
-                "native:intersection",
-                f"INPUT={brw_path}",
-                f"OVERLAY={irw_path}",
-                f"OUTPUT={output_file}"
-            ])
-            print(f"Erzeugung der Schnittmenge von {year} abgeschlossen in",
-                  (datetime.datetime.now() - now).seconds,
-                  "Sekunden")
+            print_flush(f"Verarbeite {year}...")
+            intersection_file = create_intersection(brw_path, irw_path, output_dir, year)
 
-            # Convert polygons to centroids
-            print(f"Erstelle Zentroide für {year}...")
-            centroid_file = str(output_dir / f"centroids_{year}.shp")
-            now = datetime.datetime.now()
-            subprocess.run([
-                "qgis_process.bin",
-                "run",
-                "native:pointonsurface",
-                f"INPUT={output_file}",
-                f"OUTPUT={centroid_file}",
-            ])
-            print(f"Zentroide für {year} erstellt in",
-                  (datetime.datetime.now() - now).seconds,
-                  "Sekunden")
+            reprojection_file = create_reprojection(intersection_file, output_dir, year)
 
-            # Add X, Y (latitute, longitude) to CSV
-            print(f"Füge Breitengrad und Längengrad für {year} hinzu...")
-            now = datetime.datetime.now()
-            lat_long_file = str(output_dir / f"lat_long_{year}.shp")
-            subprocess.run([
-                "qgis_process.bin",
-                "run",
-                "native:addxyfields",
-                f"INPUT={centroid_file}",
-                f"OUTPUT={lat_long_file}",
-                "CRS=EPSG:4326"
-            ])
-            print(
-                f"Breitengrad und Längengrad für {year} hinzugefügt in",
-                (datetime.datetime.now() - now).seconds,
-                "Sekunden")
+            wkt_file = create_wkt_field(reprojection_file, output_dir, year)
 
-            # Create CSV
-            print(f"Erstelle CSV für {year}...")
-            intersection_csv_file = output_dir / f'intersection_{year}.csv'
-            now = datetime.datetime.now()
-            subprocess.run([
-                "qgis_process.bin",
-                "run",
-                "native:savefeatures",
-                f"INPUT={lat_long_file}",
-                f"OUTPUT={intersection_csv_file}",
-                "LAYER_OPTIONS=GEOMETRY=AS_WKT",
-            ])
-            print(f"CSV für {year} erstellt in",
-                  (datetime.datetime.now() - now).seconds,
-                  "Sekunden")
+            centroid_file = create_centroids(wkt_file, output_dir, year)
 
-            # Clean up
-            # This requires deleting all .shp files and their .cpg, .dbf, .prj, .shx files as well
-            for file in output_dir.glob("*.shp"):
-                file.unlink()
-                for extension in (".cpg", ".dbf", ".prj", ".shx"):
-                    (file.with_suffix(extension)).unlink()
+            lat_long_file = create_lat_long(centroid_file, output_dir, year)
+
+            intersection_csv_file = create_csv_file(lat_long_file, output_dir, year)
+
+            clean_up_shape_files(output_dir)
 
             intersection_df: DataFrame
-            with open(intersection_csv_file) as csv:
+            with open(intersection_csv_file, encoding="utf-8") as csv:
                 intersection_df = pd.read_csv(csv, dtype=str)
 
             if intersection_df is None:
-                print(f"Keine Daten für {year} vorhanden?!")
+                print_flush(f"Keine Daten für {year} vorhanden?!")
                 continue
 
             # Add year
             intersection_df["JAHR"] = year
 
             # Run transformations
-            for column, transformation in COLUMNS:
+            column: str
+            transformation: Callable[[str], Any]
+            for column, transformation, _ in COLUMNS:
                 intersection_df[column] = intersection_df[column].map(transformation, na_action="ignore")
             intersection_df.fillna(np.nan, inplace=True)
             intersection_df.replace({np.nan: None}, inplace=True)
 
-            print(intersection_df.max().to_string())
+            print_flush(intersection_df.max().to_string())
 
             save_in_database(intersection_df, year)
+
+
+def clean_up_shape_files(output_dir):
+    # Clean up
+    # This requires deleting all .shp files and their .cpg, .dbf, .prj, .shx files as well
+    for file in output_dir.glob("*.shp"):
+        file.unlink()
+        for extension in (".cpg", ".dbf", ".prj", ".shx"):
+            (file.with_suffix(extension)).unlink()
+
+    # Delete the .gpkg files
+    for file in output_dir.glob("*.gpkg"):
+        file.unlink()
+
+
+def create_intersection(brw_path: Path, irw_path: Path, output_dir: Path, year) -> Path:
+    print_flush("Erzeuge Schnittmenge...")
+    intersection_file = output_dir / f"intersection_{year}.gpkg"
+    now = datetime.datetime.now()
+    subprocess.run([
+        "qgis_process.bin",
+        "run",
+        "native:intersection",
+        f"INPUT={brw_path}",
+        f"OVERLAY={irw_path}",
+        f"OUTPUT={intersection_file}"
+    ],
+        check=True)
+    print_flush(f"Erzeugung der Schnittmenge von {year} abgeschlossen in",
+                (datetime.datetime.now() - now).seconds,
+                "Sekunden")
+    return intersection_file
+
+
+def create_reprojection(input_file: Path, output_dir: Path, year) -> Path:
+    # Reproject to WGS84
+    print_flush(f"Reprojiziere {year}...")
+    reprojection_file = output_dir / f"reprojection_{year}.gpkg"
+    now = datetime.datetime.now()
+    subprocess.run([
+        "qgis_process.bin",
+        "run",
+        "native:reprojectlayer",
+        f"INPUT={input_file}",
+        "TARGET_CRS=EPSG:4326",
+        f"OUTPUT={reprojection_file}"
+    ],
+        check=True)
+    print_flush(f"Reprojizierung von {year} abgeschlossen in",
+                (datetime.datetime.now() - now).seconds,
+                "Sekunden")
+    return reprojection_file
+
+
+def create_centroids(input_file: Path, output_dir: Path, year) -> Path:
+    # Convert polygons to centroids
+    print_flush(f"Erstelle Zentroide für {year}...")
+    centroid_file = output_dir / f"centroids_{year}.gpkg"
+    now = datetime.datetime.now()
+    subprocess.run([
+        "qgis_process.bin",
+        "run",
+        "native:pointonsurface",
+        f"INPUT={input_file}",
+        f"OUTPUT={centroid_file}",
+    ],
+        check=True)
+    print_flush(f"Zentroide für {year} erstellt in",
+                (datetime.datetime.now() - now).seconds,
+                "Sekunden")
+    return centroid_file
+
+
+def create_lat_long(input_file: Path, output_dir: Path, year) -> Path:
+    print_flush(f"Füge Breitengrad und Längengrad für {year} hinzu...")
+    now = datetime.datetime.now()
+    lat_long_file = output_dir / f"lat_long_{year}.gpkg"
+    subprocess.run([
+        "qgis_process.bin",
+        "run",
+        "native:addxyfields",
+        f"INPUT={input_file}",
+        f"OUTPUT={lat_long_file}",
+        "CRS=EPSG:4326"
+    ],
+        check=True)
+    print_flush(
+        f"Breitengrad und Längengrad für {year} hinzugefügt in",
+        (datetime.datetime.now() - now).seconds,
+        "Sekunden")
+    return lat_long_file
+
+
+def create_wkt_field(input_file: Path, output_dir: Path, year) -> Path:
+    print_flush(f"Füge WKT für {year} hinzu...")
+    now = datetime.datetime.now()
+    wkt_file = output_dir / f"wkt_{year}.gpkg"
+    subprocess.run([
+        "qgis_process.bin",
+        "run",
+        "qgis:fieldcalculator",
+        f"INPUT={input_file}",
+        f"OUTPUT={wkt_file}",
+        "FIELD_NAME=WKT",
+        "FIELD_TYPE=2",
+        "FIELD_LENGTH=0",
+        "NEW_FIELD=1",
+        "FORMULA=geom_to_wkt($geometry)",
+        "CRS=EPSG:4326"
+    ],
+        check=True)
+    print_flush(
+        f"WKT für {year} hinzugefügt in",
+        (datetime.datetime.now() - now).seconds,
+        "Sekunden")
+    return wkt_file
+
+
+def create_csv_file(input_file: Path, output_dir: Path, year) -> Path:
+    print_flush(f"Erstelle CSV für {year}...")
+    intersection_csv_file = output_dir / f'intersection_{year}.csv'
+    now = datetime.datetime.now()
+    subprocess.run([
+        "qgis_process.bin",
+        "run",
+        "native:savefeatures",
+        f"INPUT={input_file}",
+        f"OUTPUT={intersection_csv_file}",
+        # "LAYER_OPTIONS=GEOMETRY=AS_WKT",
+    ],
+        check=True)
+    print_flush(f"CSV für {year} erstellt in",
+                (datetime.datetime.now() - now).seconds,
+                "Sekunden")
+    return intersection_csv_file
 
 
 def save_in_database(intersection_df, year):
