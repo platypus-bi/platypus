@@ -19,7 +19,6 @@ import numpy as np
 import pandas as pd
 import pyodbc
 import requests
-from pandas import DataFrame
 
 BORIS_BRW_BASE = "https://www.opengeodata.nrw.de/produkte/infrastruktur_bauen_wohnen/boris/BRW"
 BORIS_BRW_JSON_INDEX = f"{BORIS_BRW_BASE}/index.json"
@@ -64,7 +63,14 @@ def parse_float(value) -> Optional[float]:
     :param value: The string to parse.
     :return: The parsed float.
     """
-    return float(value.replace(",", "."))
+    if isinstance(value, float):
+        return value
+    if isinstance(value, int):
+        return float(value)
+    if isinstance(value, str):
+        return float(value.replace(",", "."))
+
+    return float(value)
 
 
 def parse_int(value) -> Optional[float]:
@@ -74,7 +80,14 @@ def parse_int(value) -> Optional[float]:
     :param value: The string to parse.
     :return: The parsed int.
     """
-    return int(value.replace(".", ""))
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        return int(value.replace(".", ""))
+
+    return int(value)
 
 
 # Columns to insert into the database
@@ -138,7 +151,7 @@ COLUMNS: list[Column] = [
     Column("FARBE_2", parse_int),
     Column("x", parse_float),
     Column("y", parse_float),
-    Column("WKT", identity, "geometry::STGeomFromText(?, 4326)"),
+    Column("WKT", identity, "geography::STGeomFromText(?, 4326)"),
 ]
 
 
@@ -220,13 +233,14 @@ def unpack_file(path: Path):
     """
     # Unpack the zip file using the zipfile module
     # Unpack into a folder with the same name as the zip file (without the .zip extension)
-    # Only unpack files that are not PDF, TXT and XLS files
+    # Only unpack files that are not PDF, TXT, XLSX and XLS files
 
     output_folder = path.parent / path.stem
 
     with zipfile.ZipFile(path, "r") as zip_file:
         for file in zip_file.namelist():
-            if not file.endswith(".pdf") and not file.endswith(".txt") and not file.endswith(".xls"):
+            extension = os.path.splitext(file)[1]
+            if extension not in (".pdf", ".txt", ".xlsx", ".xls"):
                 zip_file.extract(file, output_folder)
     # Delete the zip file
     path.unlink()
@@ -403,7 +417,8 @@ def download_historisch(base_url: str,
         downloaded_years.append(year)
 
 
-def download_aktuell(base_url: str,
+def download_aktuell(*,
+                     base_url: str,
                      dataset_type: DatasetType,
                      latest_year: Year,
                      current_datasets: Datasets,
@@ -466,7 +481,12 @@ def download_brw_aktuell(latest_year: Year, current_datasets: Datasets, dataset:
     :param downloaded_years: A list of years for which a dataset was newly downloaded.
     :return: None
     """
-    download_aktuell(BORIS_BRW_BASE, "BRW", latest_year, current_datasets, dataset, downloaded_years)
+    download_aktuell(base_url=BORIS_BRW_BASE,
+                     dataset_type="BRW",
+                     latest_year=latest_year,
+                     current_datasets=current_datasets,
+                     dataset=dataset,
+                     downloaded_years=downloaded_years)
 
 
 def download_brw_historisch(current_datasets: Datasets, dataset: dict, downloaded_years: list[Year]):
@@ -489,7 +509,12 @@ def download_irw_aktuell(latest_year: Year, current_datasets: Datasets, dataset:
     :param downloaded_years: A list of years for which a dataset was newly downloaded.
     :return: None
     """
-    download_aktuell(BORIS_IRW_BASE, "IRW", latest_year, current_datasets, dataset, downloaded_years)
+    download_aktuell(base_url=BORIS_IRW_BASE,
+                     dataset_type="IRW",
+                     latest_year=latest_year,
+                     current_datasets=current_datasets,
+                     dataset=dataset,
+                     downloaded_years=downloaded_years)
 
 
 def download_irw_historisch(current_datasets: Datasets, dataset: dict, downloaded_years: list[Year]):
@@ -588,30 +613,40 @@ def process_years(years: set[Year]):
 
             intersection_csv_file = create_csv_file(lat_long_file, output_dir, year)
 
-            clean_up_geo_files(output_dir)
+            final_process_csv_file(intersection_csv_file, output_dir, year)
 
-            intersection_df: DataFrame
-            with open(intersection_csv_file, encoding="utf-8") as csv:
-                intersection_df = pd.read_csv(csv, dtype=str)
 
-            if intersection_df is None:
-                print_flush(f"Keine Daten für {year} vorhanden?!")
-                continue
+def final_process_csv_file(csv_file: Path, output_dir: Path, year: int):
+    """
+    Processes the final CSV file and imports it into the database.
+    :param csv_file: The CSV file to process.
+    :param output_dir: The output directory.
+    :param year: The year of the dataset.
+    :return:
+    """
+    intersection_df: pd.DataFrame
+    with open(csv_file, encoding="utf-8") as csv:
+        intersection_df = pd.read_csv(csv, dtype=str)
+    if intersection_df is None:
+        print_flush(f"Keine Daten für {year} vorhanden?!")
+        return
 
-            # Add year
-            intersection_df["JAHR"] = year
+    # Add year
+    intersection_df["JAHR"] = year
 
-            # Run transformations
-            column: str
-            transformation: Callable[[str], Any]
-            for column, transformation, _ in COLUMNS:
-                intersection_df[column] = intersection_df[column].map(transformation, na_action="ignore")
-            intersection_df.fillna(np.nan, inplace=True)
-            intersection_df.replace({np.nan: None}, inplace=True)
+    # Run transformations
+    column: str
+    transformation: Callable[[str], Any]
+    for column, transformation, _ in COLUMNS:
+        intersection_df[column] = intersection_df[column].map(transformation, na_action="ignore")
 
-            print_flush(intersection_df.max().to_string())
+    intersection_df.fillna(np.nan, inplace=True)
+    intersection_df.replace({np.nan: None}, inplace=True)
 
-            save_in_database(intersection_df, year)
+    print_flush(intersection_df.max().to_string())
+
+    save_in_database(intersection_df, year)
+    clean_up_geo_files(output_dir)
 
 
 def clean_up_geo_files(output_dir):
@@ -820,10 +855,13 @@ def save_in_database(intersection_df: pd.DataFrame, year: int):
             columns = str.join(",", (f"[{column.name}]" for column in COLUMNS))
             placeholders = str.join(",", (c.placeholder for c in COLUMNS))
             try:
-                for row in intersection_df[[c.name for c in COLUMNS]].values.tolist():
+                for index, row in enumerate(intersection_df[[c.name for c in COLUMNS]].values.tolist()):
                     cursor.execute(
                         f"INSERT INTO [Daten]({columns}) VALUES({placeholders})",
                         row)
+                    if index % 1000 == 0:
+                        print_flush(f"{index} Datensätze gespeichert")
+                        cursor.commit()
                 cursor.commit()
             except pyodbc.DatabaseError as exception:
                 cursor.rollback()
