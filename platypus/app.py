@@ -25,7 +25,11 @@ Year = int
 DatasetType = str
 Datasets = dict[DatasetType, dict[Year, datetime.datetime]]
 
-Column = NamedTuple("Column", [("name", str), ("conversion", Callable[[str], Any])])
+
+class Column(NamedTuple):
+    name: str
+    conversion: Callable[[str], Any]
+    placeholder: str = "?"
 
 
 def identity(value):
@@ -101,7 +105,7 @@ COLUMNS: list[Column] = [
     Column("FARBE_2", parse_int),
     Column("x", parse_float),
     Column("y", parse_float),
-    Column("WKT", identity),
+    Column("WKT", identity, "geometry::STGeomFromText(?, 4326)"),
 ]
 
 
@@ -491,7 +495,7 @@ def save_in_database(intersection_df, year):
             cursor.execute("DELETE FROM [Daten] WHERE [JAHR] = ?", year)
 
             columns = str.join(",", (f"[{column.name}]" for column in COLUMNS))
-            placeholders = str.join(",", ("?" for _ in COLUMNS))
+            placeholders = str.join(",", (c.placeholder for c in COLUMNS))
             try:
                 for row in intersection_df[[c.name for c in COLUMNS]].values.tolist():
                     cursor.execute(
