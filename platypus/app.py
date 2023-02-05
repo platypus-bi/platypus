@@ -1,3 +1,11 @@
+"""
+This script downloads the latest data from the BORIS database and inserts it into the database.
+
+The script first checks if a new dataset is available. If so, it downloads it and inserts it into the database.
+
+The script is intended to be run as a scheduled task every day.
+"""
+
 import datetime
 import json
 import os
@@ -27,21 +35,46 @@ Datasets = dict[DatasetType, dict[Year, datetime.datetime]]
 
 
 class Column(NamedTuple):
+    """
+    Represents a column in the database.
+    The name is the same as the column name in the database.
+    The conversion is a function that converts the value from the CSV file to the correct type.
+    The placeholder is the placeholder for the value in the SQL query. It defaults to "?". This is
+    only necessary if the value needs to be converted to a different type before inserting it into
+    the database.
+    """
     name: str
     conversion: Callable[[str], Any]
     placeholder: str = "?"
 
 
 def identity(value):
+    """
+    Returns the value without any conversion.
+    :param value: The value to return.
+    :return: The value.
+    """
     return value
 
 
 def parse_float(value) -> Optional[float]:
+    """
+    Parses a float from a string.
+    Replace "," with "." to make sure that the float is parsed correctly.
+    :param value: The string to parse.
+    :return: The parsed float.
+    """
     return float(value.replace(",", "."))
 
 
 def parse_int(value) -> Optional[float]:
-    return int(value)
+    """
+    Parses an int from a string.
+    Remove all "." from the string to make sure that the int is parsed correctly.
+    :param value: The string to parse.
+    :return: The parsed int.
+    """
+    return int(value.replace(".", ""))
 
 
 # Columns to insert into the database
@@ -110,11 +143,22 @@ COLUMNS: list[Column] = [
 
 
 def print_flush(*args, **kwargs):
+    """
+    Prints the given arguments and flushes the output.
+    :param args: Positional arguments to print.
+    :param kwargs: Keyword arguments to print.
+    :return: None
+    """
     kwargs["flush"] = True
     print(*args, **kwargs)
 
 
 def retrieve_downloaded_datasets(dataset_type: DatasetType) -> Datasets:
+    """
+    Retrieves the datasets that have already been downloaded from the database.
+    :param dataset_type: The type of the dataset to retrieve. Either "IRW" or "BRW".
+    :return: A dictionary mapping the year to the last updated date.
+    """
     connection = connect_to_database()
     cursor: pyodbc.Cursor
     with connection.cursor() as cursor:
@@ -134,26 +178,46 @@ def retrieve_downloaded_datasets(dataset_type: DatasetType) -> Datasets:
 
 
 def connect_to_database(**kwargs) -> pyodbc.Connection:
+    """
+    Connects to the database.
+    Uses the environment variable "MSSQL_SA_PASSWORD" as the password for the "sa" user.
+    :param kwargs: Additional keyword arguments to pass to the pyodbc.connect function.
+    :return: The connection to the database.
+    """
     conn = pyodbc.connect("DSN=MSSQLServerDatabase",
                           user="sa",
                           password=os.environ["MSSQL_SA_PASSWORD"],
-                          ansi=True,
                           **kwargs)
     conn.setencoding(encoding='utf-8')
     return conn
 
 
-def download_large_file(url: str, name: Path):
+def download_large_file(url: str, destination_path: Path):
+    """
+    Downloads a large file from the given URL.
+    Uses the requests module to download the file in chunks of 10 MB.
+    :param url: The URL to download the file from.
+    :param destination_path: The path to save the file to.
+    :return: None
+    """
     # NOTE the stream=True parameter
     with requests.get(url, stream=True, timeout=120) as request:
         request.raise_for_status()
-        with open(name, "wb") as file:
+        with open(destination_path, "wb") as file:
             # 10 MB chunk size
             for chunk in request.iter_content(chunk_size=10 * 1024 * 1024):
                 file.write(chunk)
 
 
 def unpack_file(path: Path):
+    """
+    Unpacks the given zip file.
+    PDF, TXT and XLS files are not unpacked.
+    The output folder is the same as the name of zip file (without the .zip extension).
+    The zip file is deleted after unpacking.
+    :param path: The path to the zip file.
+    :return: None
+    """
     # Unpack the zip file using the zipfile module
     # Unpack into a folder with the same name as the zip file (without the .zip extension)
     # Only unpack files that are not PDF, TXT and XLS files
@@ -169,6 +233,12 @@ def unpack_file(path: Path):
 
 
 def determine_latest_year(dataset_type: DatasetType, datasets: dict) -> Year:
+    """
+    Determines the latest year for which a dataset is available.
+    :param dataset_type: The type of the dataset. Either "IRW" or "BRW".
+    :param datasets: The datasets to check.
+    :return: The latest year for which a dataset is available.
+    """
     latest_year = 0
     for dataset in datasets:
         if dataset["name"] == f"{dataset_type}_historisch":
@@ -185,6 +255,11 @@ def determine_latest_year(dataset_type: DatasetType, datasets: dict) -> Year:
 
 
 def determine_year(filename: str) -> Year:
+    """
+    Determines the year from the given filename.
+    :param filename: The filename to determine the year from.
+    :return: The year from the given filename.
+    """
     match = ZIP_NAME_PATTERN.fullmatch(filename)
     return int(match["year"])
 
@@ -194,6 +269,17 @@ def download_datasets(url: str,
                       current_datasets: Datasets,
                       current_callback: Callable[[Year, Datasets, dict, list[Year]], None],
                       history_callback: Callable[[Datasets, dict, list[Year]], None]) -> list[Year]:
+    """
+    Downloads the datasets from the given base URL.
+    Only downloads datasets that have not been downloaded yet.
+
+    :param url: The url containing the index of the datasets.
+    :param dataset_type: The type of the dataset to download. Either "IRW" or "BRW".
+    :param current_datasets: The current datasets already downloaded.
+    :param current_callback: A callback function to call for the current dataset.
+    :param history_callback: A callback function to call for the historical datasets.
+    :return: A list of years for which a dataset was newly downloaded.
+    """
     request = requests.get(url, timeout=120)
     index = json.loads(request.text)
 
@@ -218,6 +304,12 @@ def download_datasets(url: str,
 
 
 def download_brw(current_brw_datasets: Datasets) -> list[Year]:
+    """
+    Downloads the BRW datasets.
+    Only downloads datasets that have not been downloaded yet.
+    :param current_brw_datasets: The current BRW datasets already downloaded.
+    :return: A list of years for which a dataset was newly downloaded.
+    """
     return download_datasets(BORIS_BRW_JSON_INDEX,
                              "BRW",
                              current_brw_datasets,
@@ -226,6 +318,12 @@ def download_brw(current_brw_datasets: Datasets) -> list[Year]:
 
 
 def download_irw(current_irw_datasets: Datasets) -> list[Year]:
+    """
+    Downloads the IRW datasets.
+    Only downloads datasets that have not been downloaded yet.
+    :param current_irw_datasets: The current IRW datasets already downloaded.
+    :return: A list of years for which a dataset was newly downloaded.
+    """
     return download_datasets(BORIS_IRW_JSON_INDEX,
                              "IRW",
                              current_irw_datasets,
@@ -233,7 +331,14 @@ def download_irw(current_irw_datasets: Datasets) -> list[Year]:
                              download_irw_historisch)
 
 
-def save_current_dataset(dataset_type: DatasetType, year: Year, timestamp: datetime.datetime):
+def save_dataset_download(dataset_type: DatasetType, year: Year, timestamp: datetime.datetime):
+    """
+    Save the information about the downloaded dataset to the database.
+    :param dataset_type: The type of the dataset. Either "IRW" or "BRW".
+    :param year: The year of the dataset.
+    :param timestamp: The timestamp when the dataset was last updated.
+    :return: None
+    """
     with connect_to_database() as connection:
         cursor: pyodbc.Cursor
         with connection.cursor() as cursor:
@@ -254,6 +359,17 @@ def download_historisch(base_url: str,
                         current_datasets: Datasets,
                         dataset: dict,
                         downloaded_years: list[Year]):
+    """
+    Downloads a historical dataset.
+    Only downloads datasets that have not been downloaded yet.
+
+    :param base_url: The base URL of the dataset.
+    :param dataset_type: The type of the dataset to download. Either "IRW" or "BRW".
+    :param current_datasets: The current datasets already downloaded.
+    :param dataset: The dataset to download.
+    :param downloaded_years: A list of years for which a dataset was newly downloaded.
+    :return: None
+    """
     print_flush("Datensatz herunterladen:", dataset["name"])
     for file in dataset["files"]:
         year = determine_year(file["name"])
@@ -283,7 +399,7 @@ def download_historisch(base_url: str,
         print_flush("Entpacke:", file["name"])
         unpack_file(download_path)
         print_flush("Datei entpackt und bereinigt:", file["name"])
-        save_current_dataset(dataset_type, year, timestamp)
+        save_dataset_download(dataset_type, year, timestamp)
         downloaded_years.append(year)
 
 
@@ -293,6 +409,18 @@ def download_aktuell(base_url: str,
                      current_datasets: Datasets,
                      dataset: dict,
                      downloaded_years: list[Year]):
+    """
+    Downloads the current dataset.
+    Only downloads datasets that have not been downloaded yet.
+
+    :param base_url: The base URL of the dataset.
+    :param dataset_type: The type of the dataset to download. Either "IRW" or "BRW".
+    :param latest_year: The latest year for which a dataset is available.
+    :param current_datasets: The current datasets already downloaded.
+    :param dataset: The dataset to download.
+    :param downloaded_years: A list of years for which a dataset was newly downloaded.
+    :return: None
+    """
     print_flush("Datensatz herunterladen:", dataset["name"])
     for file in dataset["files"]:
         print_flush("Datei von:", file["timestamp"])
@@ -325,27 +453,63 @@ def download_aktuell(base_url: str,
         download_path = download_path.rename(download_dir / f"{dataset_type}_{latest_year}_EPSG25832_Shape.zip")
         unpack_file(download_path)
         print_flush("Datei entpackt und bereinigt:", file["name"])
-        save_current_dataset(dataset_type, latest_year, timestamp)
+        save_dataset_download(dataset_type, latest_year, timestamp)
         downloaded_years.append(latest_year)
 
 
 def download_brw_aktuell(latest_year: Year, current_datasets: Datasets, dataset: dict, downloaded_years: list[Year]):
+    """
+    Downloads the current BRW dataset.
+    :param latest_year: The latest year for which a dataset is available.
+    :param current_datasets: The current datasets already downloaded.
+    :param dataset: The dataset to download.
+    :param downloaded_years: A list of years for which a dataset was newly downloaded.
+    :return: None
+    """
     download_aktuell(BORIS_BRW_BASE, "BRW", latest_year, current_datasets, dataset, downloaded_years)
 
 
 def download_brw_historisch(current_datasets: Datasets, dataset: dict, downloaded_years: list[Year]):
+    """
+    Downloads the historical BRW dataset.
+    :param current_datasets: The current datasets already downloaded.
+    :param dataset: The dataset to download.
+    :param downloaded_years: A list of years for which a dataset was newly downloaded.
+    :return: None
+    """
     download_historisch(BORIS_BRW_BASE, "BRW", current_datasets, dataset, downloaded_years)
 
 
 def download_irw_aktuell(latest_year: Year, current_datasets: Datasets, dataset: dict, downloaded_years: list[Year]):
+    """
+    Downloads the current IRW dataset.
+    :param latest_year: The latest year for which a dataset is available.
+    :param current_datasets: The current datasets already downloaded.
+    :param dataset: The dataset to download.
+    :param downloaded_years: A list of years for which a dataset was newly downloaded.
+    :return: None
+    """
     download_aktuell(BORIS_IRW_BASE, "IRW", latest_year, current_datasets, dataset, downloaded_years)
 
 
 def download_irw_historisch(current_datasets: Datasets, dataset: dict, downloaded_years: list[Year]):
+    """
+    Downloads the historical IRW dataset.
+    :param current_datasets: The current datasets already downloaded.
+    :param dataset: The dataset to download.
+    :param downloaded_years: A list of years for which a dataset was newly downloaded.
+    :return: None
+    """
     download_historisch(BORIS_IRW_BASE, "IRW", current_datasets, dataset, downloaded_years)
 
 
 def run_sql_script(cursor: pyodbc.Cursor, script: str):
+    """
+    Runs a SQL script stored in the sql directory shipped with the application.
+    :param cursor: The cursor to use for executing the script.
+    :param script: The name of the script to run.
+    :return: None
+    """
     with open((Path("/app/sql") / script).with_suffix(".sql"), encoding="utf-8") as sql_file:
         try:
             for statement in sql_file.read().split("---"):
@@ -357,6 +521,11 @@ def run_sql_script(cursor: pyodbc.Cursor, script: str):
 
 
 def initialize_database():
+    """
+    Initializes the database.
+    Makes use of the SQL scripts in the sql directory shipped with the application.
+    :return: None
+    """
     with connect_to_database(autocommit=True) as connection:
         with connection.cursor() as cursor:
             run_sql_script(cursor, "01-create-database")
@@ -366,6 +535,21 @@ def initialize_database():
 
 
 def process_years(years: set[Year]):
+    """
+    Processes the given years.
+    For each year, the BRW and IRW datasets are intersected and the resulting shapefiles are imported into the database.
+    The following steps are performed:
+    1. The BRW and IRW datasets are intersected.
+    2. The resulting geopackage is reprojected to EPSG:4326.
+    3. A column is added to the geopackage containing the WKT representation of the geometry.
+    4. The centroid of the geometry is calculated and replaces the geometry.
+    5. The location of the centroid as latitude and longitude is added as separate columns.
+    6. The final geopackage is exported to a CSV file.
+    7. The CSV file is imported into the database.
+
+    :param years: The years to process.
+    :return: None
+    """
     brw_datasets = retrieve_downloaded_datasets("BRW")
     irw_datasets = retrieve_downloaded_datasets("IRW")
 
@@ -377,13 +561,14 @@ def process_years(years: set[Year]):
     if irw_datasets is None:
         return
 
+    # Create the intersection directory if it does not exist.
     Path("intersection").mkdir(parents=True, exist_ok=True)
 
     for year in years:
         if year in brw_datasets and year in irw_datasets:
             output_dir = Path("intersection") / str(year)
-            output_dir.mkdir(parents=True, exist_ok=True)
             output_dir = output_dir.absolute()
+            output_dir.mkdir(parents=True, exist_ok=True)
 
             brw_path = Path(".") / str(year) / "BRW" / f"BRW_{year}_EPSG25832_Shape" / f"BRW_{year}_Polygon.shp"
             brw_path = brw_path.absolute()
@@ -403,7 +588,7 @@ def process_years(years: set[Year]):
 
             intersection_csv_file = create_csv_file(lat_long_file, output_dir, year)
 
-            clean_up_shape_files(output_dir)
+            clean_up_geo_files(output_dir)
 
             intersection_df: DataFrame
             with open(intersection_csv_file, encoding="utf-8") as csv:
@@ -429,8 +614,13 @@ def process_years(years: set[Year]):
             save_in_database(intersection_df, year)
 
 
-def clean_up_shape_files(output_dir):
-    # Clean up
+def clean_up_geo_files(output_dir):
+    """
+    Cleans up the files created during the processing of the data.
+    This function deletes all Shapefiles and GeoPackage files, as well as their auxiliary files.
+    :param output_dir: The directory containing the files to clean up.
+    :return: None
+    """
     # This requires deleting all .shp files and their .cpg, .dbf, .prj, .shx files as well
     for file in output_dir.glob("*.shp"):
         file.unlink()
@@ -443,6 +633,17 @@ def clean_up_shape_files(output_dir):
 
 
 def create_intersection(brw_path: Path, irw_path: Path, output_dir: Path, year) -> Path:
+    """
+    Creates the intersection of the BRW and IRW files.
+    This is done using the QGIS native:intersection algorithm.
+    The result is a dataset containing the intersection of the two input files, i.e. the areas where both BRW and IRW
+    are present.
+    :param brw_path: The path to the BRW file
+    :param irw_path: The path to the IRW file
+    :param output_dir: The output directory
+    :param year: The year of the input file
+    :return: The path to the intersection file
+    """
     print_flush("Erzeuge Schnittmenge...")
     intersection_file = output_dir / f"intersection_{year}.gpkg"
     now = datetime.datetime.now()
@@ -462,6 +663,13 @@ def create_intersection(brw_path: Path, irw_path: Path, output_dir: Path, year) 
 
 
 def create_reprojection(input_file: Path, output_dir: Path, year) -> Path:
+    """
+    Reprojects the input file to WGS84/EPSG:4326 (GPS coordinates/lat/long).
+    :param input_file: The input file (should be a GPKG or SHP file)
+    :param output_dir: The output directory
+    :param year: The year of the input file
+    :return: The path to the reprojected file
+    """
     # Reproject to WGS84
     print_flush(f"Reprojiziere {year}...")
     reprojection_file = output_dir / f"reprojection_{year}.gpkg"
@@ -482,6 +690,13 @@ def create_reprojection(input_file: Path, output_dir: Path, year) -> Path:
 
 
 def create_centroids(input_file: Path, output_dir: Path, year) -> Path:
+    """
+    Create centroids for the geometry of the given input file and save them to the given output directory.
+    :param input_file: The input file (should be a GPKG or SHP file)
+    :param output_dir: The output directory
+    :param year: The year of the input file
+    :return: The path to the created file
+    """
     # Convert polygons to centroids
     print_flush(f"Erstelle Zentroide für {year}...")
     centroid_file = output_dir / f"centroids_{year}.gpkg"
@@ -501,6 +716,13 @@ def create_centroids(input_file: Path, output_dir: Path, year) -> Path:
 
 
 def create_lat_long(input_file: Path, output_dir: Path, year) -> Path:
+    """
+    Add latitude and longitude to the given file for points of the geometry
+    :param input_file: The input file (should be a GPKG or SHP file)
+    :param output_dir: The output directory
+    :param year: The year of the input file
+    :return: The path to the output file
+    """
     print_flush(f"Füge Breitengrad und Längengrad für {year} hinzu...")
     now = datetime.datetime.now()
     lat_long_file = output_dir / f"lat_long_{year}.gpkg"
@@ -521,6 +743,14 @@ def create_lat_long(input_file: Path, output_dir: Path, year) -> Path:
 
 
 def create_wkt_field(input_file: Path, output_dir: Path, year) -> Path:
+    """
+    Create a new GeoPackage file with a WKT field of the geometry
+    added to the input file.
+    :param input_file: The input file (should be a GPKG or SHP file)
+    :param output_dir: The output directory
+    :param year: The year of the input file
+    :return: The path to the new file
+    """
     print_flush(f"Füge WKT für {year} hinzu...")
     now = datetime.datetime.now()
     wkt_file = output_dir / f"wkt_{year}.gpkg"
@@ -546,6 +776,13 @@ def create_wkt_field(input_file: Path, output_dir: Path, year) -> Path:
 
 
 def create_csv_file(input_file: Path, output_dir: Path, year) -> Path:
+    """
+    Create a CSV file from the input file using QGIS
+    :param input_file: The input file (should be a GPKG or SHP file)
+    :param output_dir: The output directory
+    :param year: The year of the input file
+    :return: The path to the CSV file
+    """
     print_flush(f"Erstelle CSV für {year}...")
     intersection_csv_file = output_dir / f'intersection_{year}.csv'
     now = datetime.datetime.now()
@@ -554,8 +791,7 @@ def create_csv_file(input_file: Path, output_dir: Path, year) -> Path:
         "run",
         "native:savefeatures",
         f"INPUT={input_file}",
-        f"OUTPUT={intersection_csv_file}",
-        # "LAYER_OPTIONS=GEOMETRY=AS_WKT",
+        f"OUTPUT={intersection_csv_file}"
     ],
         check=True)
     print_flush(f"CSV für {year} erstellt in",
@@ -564,7 +800,13 @@ def create_csv_file(input_file: Path, output_dir: Path, year) -> Path:
     return intersection_csv_file
 
 
-def save_in_database(intersection_df, year):
+def save_in_database(intersection_df: pd.DataFrame, year: int):
+    """
+    Save the intersection dataframe in the database.
+    :param intersection_df: The dataframe to save.
+    :param year: The year of the data.
+    :return: None
+    """
     print_flush(f"Speichere {year} in Datenbank...")
     now = datetime.datetime.now()
     with connect_to_database() as connection:
@@ -593,6 +835,11 @@ def save_in_database(intersection_df, year):
 
 
 def main():
+    """
+    Main function
+
+    :return: None
+    """
     initialize_database()
     brw_datasets = retrieve_downloaded_datasets("BRW")
     irw_datasets = retrieve_downloaded_datasets("IRW")
