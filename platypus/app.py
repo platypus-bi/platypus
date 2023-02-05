@@ -33,17 +33,11 @@ def identity(value):
 
 
 def parse_float(value) -> Optional[float]:
-    if value:
-        return float(value.replace(",", "."))
-    else:
-        return None
+    return float(value.replace(",", "."))
 
 
 def parse_int(value) -> Optional[float]:
-    if value:
-        return int(value)
-    else:
-        return None
+    return int(value)
 
 
 # Columns to insert into the database
@@ -110,14 +104,10 @@ COLUMNS: list[Column] = [
     Column("WKT", identity),
 ]
 
-# Make sure that print is always flushed
-original_print = print
 
-
-# noinspection PyShadowingBuiltins
-def print(*args, **kwargs):
+def print_flush(*args, **kwargs):
     kwargs["flush"] = True
-    original_print(*args, **kwargs)
+    print(*args, **kwargs)
 
 
 def retrieve_downloaded_datasets(dataset_type: DatasetType) -> Datasets:
@@ -151,11 +141,11 @@ def connect_to_database(**kwargs) -> pyodbc.Connection:
 
 def download_large_file(url: str, name: Path):
     # NOTE the stream=True parameter
-    with requests.get(url, stream=True) as r:
-        r.raise_for_status()
+    with requests.get(url, stream=True, timeout=120) as request:
+        request.raise_for_status()
         with open(name, "wb") as file:
             # 10 MB chunk size
-            for chunk in r.iter_content(chunk_size=10 * 1024 * 1024):
+            for chunk in request.iter_content(chunk_size=10 * 1024 * 1024):
                 file.write(chunk)
 
 
@@ -182,9 +172,7 @@ def determine_latest_year(dataset_type: DatasetType, datasets: dict) -> Year:
             for file in files:
                 filename = file["name"]
                 match = ZIP_NAME_PATTERN.fullmatch(filename)
-                current_year = int(match["year"])
-                if latest_year < current_year:
-                    latest_year = current_year
+                latest_year = max(latest_year, int(match["year"]))
     if latest_year == 0:
         latest_year = datetime.datetime.now().year
     else:
@@ -202,8 +190,8 @@ def download_datasets(url: str,
                       current_datasets: Datasets,
                       current_callback: Callable[[Year, Datasets, dict, list[Year]], None],
                       history_callback: Callable[[Datasets, dict, list[Year]], None]) -> list[Year]:
-    r = requests.get(url)
-    index = json.loads(r.text)
+    request = requests.get(url, timeout=120)
+    index = json.loads(request.text)
 
     downloaded_years = []
 
@@ -218,9 +206,9 @@ def download_datasets(url: str,
                 # Alte Datensätze, Jahreszahl im Namen
                 history_callback(current_datasets, dataset, downloaded_years)
             else:
-                print("Historische Datensätze werden nicht heruntergeladen")
+                print_flush("Historische Datensätze werden nicht heruntergeladen")
         else:
-            print("Unbekannter Datensatz", dataset["name"])
+            print_flush("Unbekannter Datensatz", dataset["name"])
 
     return downloaded_years
 
@@ -262,35 +250,35 @@ def download_historisch(base_url: str,
                         current_datasets: Datasets,
                         dataset: dict,
                         downloaded_years: list[Year]):
-    print("Datensatz herunterladen:", dataset["name"])
+    print_flush("Datensatz herunterladen:", dataset["name"])
     for file in dataset["files"]:
         year = determine_year(file["name"])
-        print("Datei von:", file["timestamp"])
+        print_flush("Datei von:", file["timestamp"])
         timestamp = datetime.datetime.fromisoformat(file["timestamp"])
         timestamp = timestamp.replace(microsecond=0)
-        print("Datei für das Jahr:", year)
-        print("Datei prüfen:", file["name"])
-        print("Datei aktualisiert:", timestamp.isoformat())
+        print_flush("Datei für das Jahr:", year)
+        print_flush("Datei prüfen:", file["name"])
+        print_flush("Datei aktualisiert:", timestamp.isoformat())
 
         datasets_by_year = current_datasets.get(dataset_type)
         if datasets_by_year is not None:
             timestamp_for_year = datasets_by_year.get(year)
             if timestamp_for_year is not None:
-                print("Datei bereits vorhanden:", timestamp_for_year.isoformat())
+                print_flush("Datei bereits vorhanden:", timestamp_for_year.isoformat())
                 if timestamp_for_year >= timestamp:
-                    print("Datei noch aktuell, überspringe...")
+                    print_flush("Datei noch aktuell, überspringe...")
                     return
 
-        print("Datei herunterladen:", file["name"])
+        print_flush("Datei herunterladen:", file["name"])
 
         download_dir = Path(".") / str(year) / dataset_type
         download_dir.mkdir(parents=True, exist_ok=True)
         download_path = download_dir / file["name"]
         download_large_file(f"{base_url}/{file['name']}", download_path)
-        print("Datei heruntergeladen:", file["name"])
-        print("Entpacke:", file["name"])
+        print_flush("Datei heruntergeladen:", file["name"])
+        print_flush("Entpacke:", file["name"])
         unpack_file(download_path)
-        print("Datei entpackt und bereinigt:", file["name"])
+        print_flush("Datei entpackt und bereinigt:", file["name"])
         save_current_dataset(dataset_type, year, timestamp)
         downloaded_years.append(year)
 
@@ -301,38 +289,38 @@ def download_aktuell(base_url: str,
                      current_datasets: Datasets,
                      dataset: dict,
                      downloaded_years: list[Year]):
-    print("Datensatz herunterladen:", dataset["name"])
+    print_flush("Datensatz herunterladen:", dataset["name"])
     for file in dataset["files"]:
-        print("Datei von:", file["timestamp"])
+        print_flush("Datei von:", file["timestamp"])
         timestamp = datetime.datetime.fromisoformat(file["timestamp"])
         timestamp = timestamp.replace(microsecond=0)
-        print("Datei für das Jahr:", latest_year)
-        print("Datei prüfen:", file["name"])
-        print("Datei aktualisiert:", timestamp.isoformat())
+        print_flush("Datei für das Jahr:", latest_year)
+        print_flush("Datei prüfen:", file["name"])
+        print_flush("Datei aktualisiert:", timestamp.isoformat())
 
         datasets_by_year = current_datasets.get(dataset_type)
         if datasets_by_year is not None:
             timestamp_for_year = datasets_by_year.get(latest_year)
             if timestamp_for_year is not None:
-                print("Datei bereits vorhanden:", timestamp_for_year.isoformat())
+                print_flush("Datei bereits vorhanden:", timestamp_for_year.isoformat())
                 if timestamp_for_year >= timestamp:
-                    print("Datei noch aktuell, überspringe...")
+                    print_flush("Datei noch aktuell, überspringe...")
                     return
 
-        print("Datei herunterladen:", file["name"])
+        print_flush("Datei herunterladen:", file["name"])
 
         download_dir = Path(".") / str(latest_year) / dataset_type
         download_dir.mkdir(parents=True, exist_ok=True)
         download_path = download_dir / file["name"]
         download_large_file(f"{base_url}/{file['name']}", download_path)
-        print("Datei herunterladen:", file["name"], "fertig")
-        print("Entpacke:", file["name"])
+        print_flush("Datei herunterladen:", file["name"], "fertig")
+        print_flush("Entpacke:", file["name"])
 
         # Old name: BRW_EPSG25832_Shape.zip
         # New name: BRW_2022_EPSG25832_Shape.zip
         download_path = download_path.rename(download_dir / f"{dataset_type}_{latest_year}_EPSG25832_Shape.zip")
         unpack_file(download_path)
-        print("Datei entpackt und bereinigt:", file["name"])
+        print_flush("Datei entpackt und bereinigt:", file["name"])
         save_current_dataset(dataset_type, latest_year, timestamp)
         downloaded_years.append(latest_year)
 
@@ -354,14 +342,14 @@ def download_irw_historisch(current_datasets: Datasets, dataset: dict, downloade
 
 
 def run_sql_script(cursor: pyodbc.Cursor, script: str):
-    with open((Path("/app/sql") / script).with_suffix(".sql")) as f:
+    with open((Path("/app/sql") / script).with_suffix(".sql"), encoding="utf-8") as sql_file:
         try:
-            for statement in f.read().split("---"):
+            for statement in sql_file.read().split("---"):
                 cursor.execute(statement)
             cursor.commit()
-        except pyodbc.ProgrammingError as e:
+        except pyodbc.ProgrammingError as exception:
             cursor.rollback()
-            raise e
+            raise exception
 
 
 def initialize_database():
@@ -492,7 +480,7 @@ def process_years(years: set[Year]):
 
 
 def save_in_database(intersection_df, year):
-    print(f"Speichere {year} in Datenbank...")
+    print_flush(f"Speichere {year} in Datenbank...")
     now = datetime.datetime.now()
     with connect_to_database() as connection:
         cursor: pyodbc.Cursor
@@ -510,10 +498,10 @@ def save_in_database(intersection_df, year):
                         f"INSERT INTO [Daten]({columns}) VALUES({placeholders})",
                         row)
                 cursor.commit()
-            except pyodbc.DatabaseError as e:
+            except pyodbc.DatabaseError as exception:
                 cursor.rollback()
-                raise e
-    print(
+                raise exception
+    print_flush(
         f"Speichern von {year} in Datenbank abgeschlossen in",
         (datetime.datetime.now() - now).seconds,
         "Sekunden")
@@ -523,8 +511,8 @@ def main():
     initialize_database()
     brw_datasets = retrieve_downloaded_datasets("BRW")
     irw_datasets = retrieve_downloaded_datasets("IRW")
-    print("Vorhandene BRW Datensätze:", brw_datasets)
-    print("Vorhandene IRW Datensätze:", irw_datasets)
+    print_flush("Vorhandene BRW Datensätze:", brw_datasets)
+    print_flush("Vorhandene IRW Datensätze:", irw_datasets)
     downloaded_brw = download_brw(brw_datasets)
     downloaded_irw = download_irw(irw_datasets)
 
