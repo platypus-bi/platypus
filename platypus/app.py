@@ -19,6 +19,7 @@ import numpy as np
 import pandas as pd
 import pyodbc
 import requests
+from apscheduler.schedulers.blocking import BlockingScheduler
 
 BORIS_BRW_BASE = "https://www.opengeodata.nrw.de/produkte/infrastruktur_bauen_wohnen/boris/BRW"
 BORIS_BRW_JSON_INDEX = f"{BORIS_BRW_BASE}/index.json"
@@ -163,6 +164,9 @@ def print_flush(*args, **kwargs):
     :return: None
     """
     kwargs["flush"] = True
+
+    # Print the current date and time for debugging purposes
+    print('[', datetime.datetime.now(), ']', sep='', end=": ")
     print(*args, **kwargs)
 
 
@@ -891,3 +895,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+    scheduler = BlockingScheduler()
+    scheduler.add_job(main, 'cron', day_of_week='mon-sun', hour=0)
+    scheduler.start()
