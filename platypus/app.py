@@ -876,6 +876,7 @@ def save_in_database(intersection_df: pd.DataFrame, year: int):
             except pyodbc.DatabaseError as exception:
                 cursor.rollback()
                 raise exception
+    print_flush(f"Alle {len(intersection_df)} Datensätze gespeichert.")
     print_flush(
         f"Speichern von {year} in Datenbank abgeschlossen in",
         (datetime.datetime.now() - now).seconds,
