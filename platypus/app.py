@@ -405,7 +405,7 @@ def download_historisch(base_url: str,
                 print_flush("Datei bereits vorhanden:", timestamp_for_year.isoformat())
                 if timestamp_for_year >= timestamp:
                     print_flush("Datei noch aktuell, überspringe...")
-                    return
+                    continue
 
         print_flush("Datei herunterladen:", file["name"])
 
@@ -456,7 +456,7 @@ def download_aktuell(*,
                 print_flush("Datei bereits vorhanden:", timestamp_for_year.isoformat())
                 if timestamp_for_year >= timestamp:
                     print_flush("Datei noch aktuell, überspringe...")
-                    return
+                    continue
 
         print_flush("Datei herunterladen:", file["name"])
 
