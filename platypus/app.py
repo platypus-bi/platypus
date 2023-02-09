@@ -69,7 +69,7 @@ def parse_float(value) -> Optional[float]:
     if isinstance(value, int):
         return float(value)
     if isinstance(value, str):
-        return float(value.replace(",", "."))
+        return float(value.replace(",", ".").replace("*", ""))
 
     return float(value)
 
