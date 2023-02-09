@@ -643,11 +643,17 @@ def final_process_csv_file(csv_file: Path, output_dir: Path, year: int):
     transformation: Callable[[str], Any]
     for column, transformation, _ in COLUMNS:
         intersection_df[column] = intersection_df[column].map(transformation, na_action="ignore")
+        if column == "HBRW":
+            # If the value in column STAG is less than 2022-01-01, then parse the column BRW as HBRW, else keep the
+            # column HBRW as is.
+            intersection_df["BRW"] = intersection_df["BRW"].map(transformation, na_action="ignore")
+            intersection_df["HBRW"] = intersection_df.apply(
+                lambda row: row["BRW"] if datetime.datetime.fromisoformat(row["STAG"]) < datetime.datetime(2022, 1, 1)
+                else row["HBRW"], axis=1
+            )
 
     intersection_df.fillna(np.nan, inplace=True)
     intersection_df.replace({np.nan: None}, inplace=True)
-
-    print_flush(intersection_df.max().to_string())
 
     save_in_database(intersection_df, year)
     clean_up_geo_files(output_dir)
