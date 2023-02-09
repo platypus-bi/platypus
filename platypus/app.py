@@ -898,6 +898,7 @@ def main():
     downloaded_irw = download_irw(irw_datasets)
 
     process_years(set(downloaded_brw).union(downloaded_irw))
+    print_flush("Vorgang abgeschlossen.")
 
 
 if __name__ == "__main__":
